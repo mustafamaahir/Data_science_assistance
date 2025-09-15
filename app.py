@@ -43,7 +43,10 @@ if nav == 'Upload':
     if uploaded is not None:
         try:
             if uploaded.name.lower().endswith('.csv'):
-                df = pd.read_csv(uploaded)
+                try:
+                    df = pd.read_csv(uploaded, encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(uploaded, encoding='ISO-8859-1')  # fallback for non-UTF8 files
             else:
                 df = pd.read_excel(uploaded)
             st.session_state['df'] = df
