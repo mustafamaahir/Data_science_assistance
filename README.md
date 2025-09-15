@@ -1,6 +1,6 @@
-# Modular Streamlit Data Science Assistant
+#  Data Science Assistant App
 
-A modular Streamlit app for end-to-end data science:
+A Streamlit app for end-to-end data science:
 - Upload data
 - Run quick EDA and profiling
 - Preprocess automatically
