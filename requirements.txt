@@ -3,7 +3,7 @@ pandas
 numpy
 matplotlib
 seaborn
-ydata-profiling
+sweetviz
 scikit-learn
 python-docx
 requests
