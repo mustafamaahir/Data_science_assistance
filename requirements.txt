@@ -9,3 +9,4 @@ requests
 xgboost
 sweetviz
 setuptools
+openpyxl
