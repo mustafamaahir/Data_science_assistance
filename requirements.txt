@@ -3,8 +3,9 @@ pandas
 numpy
 matplotlib
 seaborn
-sweetviz
 scikit-learn
 python-docx
 requests
 xgboost
+sweetviz
+setuptools
