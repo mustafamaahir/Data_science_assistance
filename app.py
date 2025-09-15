@@ -11,7 +11,7 @@ import json
 import uuid
 
 st.set_page_config(page_title="Data Science Assistant", layout="wide")
-st.title("Modular Data Science Assistant")
+st.title("Data Science Assistant")
 
 # Sidebar: API & navigation
 st.sidebar.header('Settings & API')
