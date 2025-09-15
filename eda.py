@@ -15,21 +15,30 @@ def quick_eda(df: pd.DataFrame):
     }
 
     figs = []
-    # Distribution of numeric features
-    if not df.select_dtypes(include='number').empty:
-        fig, ax = plt.subplots()
-        df.hist(ax=ax)
-        figs.append(fig)
 
-    # Correlation heatmap
-    if df.select_dtypes(include='number').shape[1] > 1:
-        fig, ax = plt.subplots()
-        sns.heatmap(df.corr(), annot=False, cmap="coolwarm", ax=ax)
-        figs.append(fig)
+    # Distribution of numeric features
+    numeric_df = df.select_dtypes(include='number')
+    if not numeric_df.empty:
+        fig1, ax1 = plt.subplots(figsize=(8, 4))
+        numeric_df.hist(ax=ax1)
+        figs.append(fig1)
+
+    # Correlation heatmap (only numeric columns)
+    if numeric_df.shape[1] > 1:
+        corr = numeric_df.corr()
+        fig2, ax2 = plt.subplots(figsize=(6, 5))
+        sns.heatmap(corr, annot=False, cmap="coolwarm", ax=ax2)
+        figs.append(fig2)
+
+    # Missingness bar for top 20 missing columns
+    missing_series = df.isna().sum().sort_values(ascending=False).head(20)
+    if not missing_series.empty:
+        fig3, ax3 = plt.subplots(figsize=(8, 3))
+        sns.barplot(x=missing_series.values, y=missing_series.index, ax=ax3)
+        ax3.set_xlabel('Missing values')
+        figs.append(fig3)
 
     return summary_cards, figs
-
-
 
 def run_full_profile(df):
     report = sv.analyze(df)
