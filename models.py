@@ -2,7 +2,8 @@ import numpy as np
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score,
-    mean_squared_error, r2_score, mean_absolute_error
+    mean_squared_error, r2_score, mean_absolute_error, confusion_matrix,
+    classification_report
 )
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, LinearRegression
@@ -149,12 +150,34 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
     # Calculate metrics
     metrics = {}
     
-    if problem_type == 'classification':
+    if problem_type == "classification":
+
+        # Core metrics
         metrics["accuracy"] = float(accuracy_score(y_test, y_pred))
-        metrics["f1_score"] = float(f1_score(y_test, y_pred, average="weighted"))
-        metrics["precision"] = float(precision_score(y_test, y_pred, average="weighted"))
-        metrics["recall"] = float(recall_score(y_test, y_pred, average="weighted"))
-    
+        metrics["f1_score"] = float(
+            f1_score(y_test, y_pred, average="weighted", zero_division=0)
+        )
+        metrics["precision"] = float(
+            precision_score(y_test, y_pred, average="weighted", zero_division=0)
+        )
+        metrics["recall"] = float(
+            recall_score(y_test, y_pred, average="weighted", zero_division=0)
+        )
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_test, y_pred)
+
+        # Store confusion matrix safely
+        metrics["confusion_matrix"] = cm.tolist()
+
+        # Optional: detailed per-class report
+        metrics["classification_report"] = classification_report(
+            y_test,
+            y_pred,
+            output_dict=True,
+            zero_division=0
+        )
+
     else:  # regression
         metrics["rmse"] = float(np.sqrt(mean_squared_error(y_test, y_pred)))
         metrics["mae"] = float(mean_absolute_error(y_test, y_pred))
