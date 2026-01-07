@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import KNNImputer
-# Enable experimental feature BEFORE importing
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.experimental import enable_iterative_imputer  # noqa
 from sklearn.impute import IterativeImputer
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from scipy.stats import chi2_contingency
+import streamlit as st
 
 
 def test_mcar(df: pd.DataFrame, col: str) -> dict:
@@ -20,28 +22,21 @@ def test_mcar(df: pd.DataFrame, col: str) -> dict:
     if df[col].isna().sum() == 0:
         return {'is_mcar': True, 'p_value': 1.0, 'method': 'no_missing'}
     
-    # Create missingness indicator
     df_temp = df.copy()
     df_temp['missing_indicator'] = df_temp[col].isna().astype(int)
     
-    # Test correlation with other columns
     numeric_cols = df_temp.select_dtypes(include='number').columns
     numeric_cols = [c for c in numeric_cols if c not in [col, 'missing_indicator']]
     
     if len(numeric_cols) == 0:
-        # For categorical-only datasets, use chi-square
         cat_cols = df_temp.select_dtypes(exclude='number').columns
         cat_cols = [c for c in cat_cols if c != col]
         
         if len(cat_cols) == 0:
             return {'is_mcar': True, 'p_value': 1.0, 'method': 'insufficient_data'}
         
-        # Chi-square test with first categorical column
         try:
-            contingency = pd.crosstab(
-                df_temp['missing_indicator'], 
-                df_temp[cat_cols[0]]
-            )
+            contingency = pd.crosstab(df_temp['missing_indicator'], df_temp[cat_cols[0]])
             chi2, p_value, _, _ = chi2_contingency(contingency)
             
             return {
@@ -52,7 +47,6 @@ def test_mcar(df: pd.DataFrame, col: str) -> dict:
         except:
             return {'is_mcar': True, 'p_value': 1.0, 'method': 'chi_square_failed'}
     
-    # Correlation test for numeric columns
     correlations = []
     for num_col in numeric_cols:
         if df_temp[num_col].isna().sum() < len(df_temp):
@@ -63,14 +57,12 @@ def test_mcar(df: pd.DataFrame, col: str) -> dict:
     if len(correlations) == 0:
         return {'is_mcar': True, 'p_value': 1.0, 'method': 'no_valid_correlations'}
     
-    # If max correlation is low, likely MCAR
     max_corr = max(correlations)
-    # Simple threshold: if max correlation < 0.1, consider MCAR
     is_mcar = max_corr < 0.1
     
     return {
         'is_mcar': is_mcar,
-        'p_value': 1 - max_corr,  # Pseudo p-value
+        'p_value': 1 - max_corr,
         'method': 'correlation',
         'max_correlation': float(max_corr)
     }
@@ -82,18 +74,10 @@ def compare_imputation_methods(
     is_numeric: bool,
     n_neighbors: int = 5
 ) -> dict:
-    """
-    Compare KNN and Regression imputation, return best method.
-    
-    Returns:
-        dict with 'best_method', 'knn_score', 'regression_score'
-    """
+    """Compare KNN and Regression imputation, return best method."""
     df_temp = df.copy()
-    
-    # Create mask of originally missing values
     missing_mask = df_temp[col].isna()
     
-    # If too few non-missing values, use median/mode
     if missing_mask.sum() > 0.8 * len(df_temp):
         return {
             'best_method': 'simple',
@@ -102,7 +86,6 @@ def compare_imputation_methods(
             'regression_score': None
         }
     
-    # Artificially create test set by masking 20% of non-missing values
     non_missing_idx = df_temp[~missing_mask].index
     if len(non_missing_idx) < 10:
         return {
@@ -114,16 +97,12 @@ def compare_imputation_methods(
     
     test_size = min(int(0.2 * len(non_missing_idx)), 100)
     test_idx = np.random.choice(non_missing_idx, size=test_size, replace=False)
-    
-    # Store true values
     true_values = df_temp.loc[test_idx, col].values
     
-    # Mask them
     df_test = df_temp.copy()
     df_test.loc[test_idx, col] = np.nan
     
     try:
-        # KNN Imputation
         if is_numeric:
             knn_imputer = KNNImputer(n_neighbors=n_neighbors)
             numeric_cols = df_test.select_dtypes(include='number').columns.tolist()
@@ -137,10 +116,8 @@ def compare_imputation_methods(
             knn_pred = df_knn_imputed.loc[test_idx, col].values
             knn_score = np.sqrt(np.mean((true_values - knn_pred) ** 2))
         else:
-            # For categorical, use mode imputation as baseline
             knn_score = None
         
-        # Regression Imputation (IterativeImputer)
         if is_numeric:
             reg_imputer = IterativeImputer(
                 random_state=42,
@@ -158,7 +135,6 @@ def compare_imputation_methods(
         else:
             reg_score = None
         
-        # Choose best method
         if knn_score is not None and reg_score is not None:
             best_method = 'knn' if knn_score < reg_score else 'regression'
         elif knn_score is not None:
@@ -188,11 +164,10 @@ def smart_impute_column(
     df: pd.DataFrame,
     col: str,
     method: str,
-    n_neighbors: int = 5
+    n_neighbors: int = 5,
+    fill_value: str = 'Missing'
 ) -> pd.Series:
-    """
-    Impute a single column using specified method.
-    """
+    """Impute a single column using specified method."""
     if method == 'drop':
         return df[col].dropna()
     
@@ -202,7 +177,15 @@ def smart_impute_column(
         if is_numeric:
             return df[col].fillna(df[col].median())
         else:
-            return df[col].fillna(df[col].mode()[0] if len(df[col].mode()) > 0 else 'Unknown')
+            # For categorical: use mode or custom fill value
+            mode_val = df[col].mode()
+            if len(mode_val) > 0:
+                return df[col].fillna(mode_val[0])
+            else:
+                return df[col].fillna(fill_value)
+    
+    elif method == 'constant' and not is_numeric:
+        return df[col].fillna(fill_value)
     
     elif method == 'knn' and is_numeric:
         try:
@@ -237,8 +220,7 @@ def smart_impute_column(
             return df[col].fillna(df[col].median())
     
     else:
-        # Fallback
-        return smart_impute_column(df, col, 'simple')
+        return smart_impute_column(df, col, 'simple', fill_value=fill_value)
 
 
 def comprehensive_preprocessing(
@@ -247,18 +229,10 @@ def comprehensive_preprocessing(
     drop_threshold: float = 0.05,
     knn_neighbors: int = 5,
     scale_numeric: bool = True,
-    skip_mcar: bool = False
+    skip_mcar: bool = False,
+    cat_fill_value: str = 'Missing'
 ) -> dict:
-    """
-    Perform comprehensive preprocessing with MCAR testing and smart imputation.
-    
-    Returns:
-        dict with:
-            - X_processed: processed features
-            - y: target variable
-            - preprocessing_log: detailed log of all steps
-            - imputation_decisions: dict of column -> method chosen
-    """
+    """Perform comprehensive preprocessing with MCAR testing and smart imputation."""
     preprocessing_log = []
     imputation_decisions = {}
     
@@ -277,7 +251,12 @@ def comprehensive_preprocessing(
             )
         else:
             is_numeric = pd.api.types.is_numeric_dtype(y)
-            fill_val = y.median() if is_numeric else y.mode()[0]
+            if is_numeric:
+                fill_val = y.median()
+            else:
+                mode_val = y.mode()
+                fill_val = mode_val[0] if len(mode_val) > 0 else cat_fill_value
+            
             df_work[target] = df_work[target].fillna(fill_val)
             y = df_work[target]
             preprocessing_log.append(
@@ -307,21 +286,19 @@ def comprehensive_preprocessing(
                 f"(p={mcar_result.get('p_value', 'N/A'):.3f})"
             )
         else:
-            is_mcar = missing_ratio < 0.2  # Simple heuristic
+            is_mcar = missing_ratio < 0.2
             preprocessing_log.append(
                 f"Column '{col}': {missing_ratio:.1%} missing (MCAR test skipped)"
             )
         
         # Decision logic
         if is_mcar and missing_ratio < drop_threshold:
-            # Drop rows with missing values
             X = X.dropna(subset=[col])
             y = y.loc[X.index]
             imputation_decisions[col] = 'drop'
             preprocessing_log.append(f"  → Action: Dropped rows with missing values")
         
         elif is_numeric:
-            # Compare KNN vs Regression
             comparison = compare_imputation_methods(
                 X, col, is_numeric=True, n_neighbors=knn_neighbors
             )
@@ -343,10 +320,10 @@ def comprehensive_preprocessing(
                 )
         
         else:
-            # Categorical: use mode
-            X[col] = smart_impute_column(X, col, 'simple')
-            imputation_decisions[col] = 'mode'
-            preprocessing_log.append(f"  → Action: Mode imputation (categorical)")
+            # Categorical: use mode or constant
+            X[col] = smart_impute_column(X, col, 'simple', fill_value=cat_fill_value)
+            imputation_decisions[col] = f'mode/constant ({cat_fill_value})'
+            preprocessing_log.append(f"  → Action: Mode/constant imputation (categorical)")
     
     # 4. Build sklearn pipeline for encoding/scaling
     num_cols = X.select_dtypes(include='number').columns.tolist()
@@ -362,8 +339,6 @@ def comprehensive_preprocessing(
         if num_steps:
             transformers.append(('num', Pipeline(num_steps), num_cols))
         else:
-            # No scaling, just pass through
-            from sklearn.preprocessing import FunctionTransformer
             transformers.append(('num', FunctionTransformer(), num_cols))
     
     if cat_cols:
@@ -377,7 +352,6 @@ def comprehensive_preprocessing(
         preprocessor = ColumnTransformer(transformers, remainder='drop')
         X_processed = preprocessor.fit_transform(X)
         
-        # Get feature names
         feature_names = []
         if num_cols and scale_numeric:
             feature_names.extend([f"num__{c}" for c in num_cols])
@@ -403,34 +377,6 @@ def comprehensive_preprocessing(
         'imputation_decisions': imputation_decisions,
         'preprocessor': preprocessor
     }
-
-
-def handle_target_missingness(
-    df: pd.DataFrame,
-    target: str,
-    problem_type: str,
-    drop_threshold: float = 0.05
-):
-    """Legacy function for backward compatibility."""
-    y = df[target]
-    missing_ratio = y.isna().mean()
-    
-    if missing_ratio == 0:
-        return df.copy(), y.copy()
-    
-    if missing_ratio < drop_threshold:
-        df_clean = df.dropna(subset=[target])
-        return df_clean, df_clean[target]
-    
-    if problem_type == "regression":
-        fill_value = y.median()
-    else:
-        fill_value = y.mode()[0] if len(y.mode()) > 0 else y.value_counts().index[0]
-    
-    df_imputed = df.copy()
-    df_imputed[target] = df_imputed[target].fillna(fill_value)
-    
-    return df_imputed, df_imputed[target]
 
 
 def missing_summary(df: pd.DataFrame) -> pd.DataFrame:
