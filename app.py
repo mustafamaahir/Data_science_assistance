@@ -35,11 +35,11 @@ else:
 
 st.sidebar.markdown('---')
 nav = st.sidebar.radio('📋 Workflow', [
-    '📤 Upload', 
-    '📊 EDA & Profiling', 
-    '🔧 Preprocess', 
-    '🤖 Modeling', 
-    '📄 Report'
+    'Upload', 
+    'EDA & Profiling', 
+    'Preprocess', 
+    'Modeling', 
+    'Report'
 ])
 
 # Global session storage
