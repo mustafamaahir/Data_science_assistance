@@ -187,11 +187,11 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
             ax = fig3.add_subplot(n_rows, 2, idx)
             top_values = df[col].value_counts().head(10)
             
-            # Use matplotlib directly instead of pandas plot
+            # Use matplotlib directly - no pandas plotting
             y_pos = np.arange(len(top_values))
             ax.barh(y_pos, top_values.values, color='lightgreen')
             ax.set_yticks(y_pos)
-            ax.set_yticklabels(top_values.index)
+            ax.set_yticklabels(top_values.index, fontsize=8)
             ax.invert_yaxis()
             ax.set_title(f'{col} (Top 10)', fontsize=10)
             ax.set_xlabel('Count')

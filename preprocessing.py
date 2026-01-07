@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.experimental import enable_iterative_imputer  # noqa
 from sklearn.impute import IterativeImputer
@@ -229,8 +229,7 @@ def comprehensive_preprocessing(
     drop_threshold: float = 0.05,
     knn_neighbors: int = 5,
     scale_numeric: bool = True,
-    skip_mcar: bool = False,
-    cat_fill_value: str = 'Missing'
+    skip_mcar: bool = False
 ) -> dict:
     """Perform comprehensive preprocessing with MCAR testing and smart imputation."""
     preprocessing_log = []
@@ -255,7 +254,7 @@ def comprehensive_preprocessing(
                 fill_val = y.median()
             else:
                 mode_val = y.mode()
-                fill_val = mode_val[0] if len(mode_val) > 0 else cat_fill_value
+                fill_val = mode_val[0] if len(mode_val) > 0 else 'Missing'
             
             df_work[target] = df_work[target].fillna(fill_val)
             y = df_work[target]
@@ -321,8 +320,8 @@ def comprehensive_preprocessing(
         
         else:
             # Categorical: use mode or constant
-            X[col] = smart_impute_column(X, col, 'simple', fill_value=cat_fill_value)
-            imputation_decisions[col] = f'mode/constant ({cat_fill_value})'
+            X[col] = smart_impute_column(X, col, 'simple', fill_value='Missing')
+            imputation_decisions[col] = 'mode/constant (Missing)'
             preprocessing_log.append(f"  → Action: Mode/constant imputation (categorical)")
     
     # 4. Build sklearn pipeline for encoding/scaling
@@ -339,6 +338,7 @@ def comprehensive_preprocessing(
         if num_steps:
             transformers.append(('num', Pipeline(num_steps), num_cols))
         else:
+            from sklearn.preprocessing import FunctionTransformer
             transformers.append(('num', FunctionTransformer(), num_cols))
     
     if cat_cols:

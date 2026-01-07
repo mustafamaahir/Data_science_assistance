@@ -128,7 +128,6 @@ elif nav == '🔧 Preprocess':
     with col1:
         drop_threshold = st.slider('Drop threshold (% missing in target)', 0.0, 0.2, 0.05, 0.01, help="If target has less than this % missing, drop those rows")
         knn_neighbors = st.slider('KNN neighbors (k)', 3, 15, 5, help="Number of neighbors for KNN imputation")
-        cat_fill_value = st.text_input('Categorical fill value', value='Missing', help="Value to use for missing categorical data")
     with col2:
         scale_numeric = st.checkbox('Scale numeric features', value=True, help="Apply StandardScaler to numeric features")
         skip_mcar = st.checkbox('Skip MCAR test (faster)', value=False, help="Skip statistical testing for faster processing")
@@ -162,7 +161,7 @@ elif nav == '🔧 Preprocess':
                 status_text = st.empty()
                 status_text.text('Running MCAR tests...')
                 progress_bar.progress(20)
-                result = comprehensive_preprocessing(df=df, target=target, drop_threshold=drop_threshold, knn_neighbors=knn_neighbors, scale_numeric=scale_numeric, skip_mcar=skip_mcar, cat_fill_value=cat_fill_value)
+                result = comprehensive_preprocessing(df=df, target=target, drop_threshold=drop_threshold, knn_neighbors=knn_neighbors, scale_numeric=scale_numeric, skip_mcar=skip_mcar)
                 progress_bar.progress(80)
                 status_text.text('Finalizing...')
                 st.session_state['X_processed'] = result['X_processed']
@@ -186,196 +185,179 @@ elif nav == '🔧 Preprocess':
                 st.code(traceback.format_exc())
 
 elif nav == '🎨 Feature Engineering':
-    st.header('4️⃣ Feature Engineering')
+    st.header('4️⃣ AI-Powered Feature Engineering')
     if st.session_state.get('df') is None:
         st.info('👈 Please upload a dataset first.')
         st.stop()
+    
     if st.session_state.get('engineered_df') is not None:
         df = st.session_state['engineered_df']
-        st.info('📝 Working with engineered dataset')
+        st.success('📝 Working with AI-engineered dataset')
     else:
         df = st.session_state['df'].copy()
         st.info('📝 Working with original dataset')
+    
     st.write(f"Current shape: **{df.shape[0]:,} rows × {df.shape[1]} columns**")
+    
+    if not groq_token:
+        st.error('❌ Please provide Groq API Key in sidebar to use AI feature engineering')
+        st.stop()
+    
     st.markdown('---')
-    st.subheader('➕ Create New Features')
-    feature_type = st.selectbox('Feature type to create', ['Mathematical Operation', 'Binning/Categorization', 'Date/Time Features', 'Text Features', 'AI-Suggested Features'])
-    if feature_type == 'Mathematical Operation':
-        st.write("Create new features using mathematical operations")
-        numeric_cols = df.select_dtypes(include='number').columns.tolist()
-        if len(numeric_cols) >= 2:
-            col1, col2 = st.columns(2)
-            with col1:
-                feat1 = st.selectbox('First feature', numeric_cols)
-            with col2:
-                feat2 = st.selectbox('Second feature', [c for c in numeric_cols if c != feat1])
-            operation = st.selectbox('Operation', ['Add (+)', 'Subtract (-)', 'Multiply (*)', 'Divide (/)', 'Power (^)', 'Log Ratio'])
-            new_name = st.text_input('New feature name', value=f'{feat1}_{operation}_{feat2}')
-            if st.button('Create Feature'):
-                try:
-                    if operation == 'Add (+)':
-                        df[new_name] = df[feat1] + df[feat2]
-                    elif operation == 'Subtract (-)':
-                        df[new_name] = df[feat1] - df[feat2]
-                    elif operation == 'Multiply (*)':
-                        df[new_name] = df[feat1] * df[feat2]
-                    elif operation == 'Divide (/)':
-                        df[new_name] = df[feat1] / (df[feat2] + 1e-10)
-                    elif operation == 'Power (^)':
-                        df[new_name] = df[feat1] ** df[feat2]
-                    elif operation == 'Log Ratio':
-                        df[new_name] = np.log1p(df[feat1]) - np.log1p(df[feat2])
-                    st.session_state['engineered_df'] = df
-                    st.success(f'✅ Created feature: {new_name}')
-                    st.dataframe(df[[feat1, feat2, new_name]].head())
-                except Exception as e:
-                    st.error(f'Failed to create feature: {e}')
-        else:
-            st.warning('Need at least 2 numeric columns')
-    elif feature_type == 'Binning/Categorization':
-        st.write("Convert continuous features into categorical bins")
-        numeric_cols = df.select_dtypes(include='number').columns.tolist()
-        if numeric_cols:
-            col_to_bin = st.selectbox('Column to bin', numeric_cols)
-            bin_method = st.radio('Binning method', ['Equal Width', 'Equal Frequency', 'Custom Bins'])
-            if bin_method in ['Equal Width', 'Equal Frequency']:
-                n_bins = st.slider('Number of bins', 2, 10, 5)
-                labels = st.text_input('Labels (comma-separated)', value='Low,Medium-Low,Medium,Medium-High,High'[:n_bins*6])
-                labels_list = [l.strip() for l in labels.split(',')][:n_bins]
-            else:
-                bins_str = st.text_input('Custom bin edges (comma-separated)', value='0,25,50,75,100')
-                bins_list = [float(b.strip()) for b in bins_str.split(',')]
-                labels = st.text_input('Labels (comma-separated)', value='Low,Medium,High')
-                labels_list = [l.strip() for l in labels.split(',')]
-            new_name = st.text_input('New feature name', value=f'{col_to_bin}_binned')
-            if st.button('Create Binned Feature'):
-                try:
-                    if bin_method == 'Equal Width':
-                        df[new_name] = pd.cut(df[col_to_bin], bins=n_bins, labels=labels_list)
-                    elif bin_method == 'Equal Frequency':
-                        df[new_name] = pd.qcut(df[col_to_bin], q=n_bins, labels=labels_list, duplicates='drop')
-                    else:
-                        df[new_name] = pd.cut(df[col_to_bin], bins=bins_list, labels=labels_list)
-                    st.session_state['engineered_df'] = df
-                    st.success(f'✅ Created binned feature: {new_name}')
-                    st.write(df[[col_to_bin, new_name]].head(10))
-                    st.write(f"Value counts:\n{df[new_name].value_counts()}")
-                except Exception as e:
-                    st.error(f'Failed to create binned feature: {e}')
-        else:
-            st.warning('No numeric columns available')
-    elif feature_type == 'Date/Time Features':
-        st.write("Extract features from date/time columns")
-        date_cols = df.select_dtypes(include=['datetime64', 'object']).columns.tolist()
-        if date_cols:
-            date_col = st.selectbox('Select date column', date_cols)
-            if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-                if st.button('Convert to datetime'):
-                    try:
-                        df[date_col] = pd.to_datetime(df[date_col])
-                        st.success(f'✅ Converted {date_col} to datetime')
-                    except:
-                        st.error('Failed to convert. Please check date format.')
-                        st.stop()
-            if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-                features_to_extract = st.multiselect('Features to extract', ['Year', 'Month', 'Day', 'Day of Week', 'Quarter', 'Week of Year', 'Is Weekend'])
-                if st.button('Extract Date Features'):
-                    try:
-                        if 'Year' in features_to_extract:
-                            df[f'{date_col}_year'] = df[date_col].dt.year
-                        if 'Month' in features_to_extract:
-                            df[f'{date_col}_month'] = df[date_col].dt.month
-                        if 'Day' in features_to_extract:
-                            df[f'{date_col}_day'] = df[date_col].dt.day
-                        if 'Day of Week' in features_to_extract:
-                            df[f'{date_col}_dayofweek'] = df[date_col].dt.dayofweek
-                        if 'Quarter' in features_to_extract:
-                            df[f'{date_col}_quarter'] = df[date_col].dt.quarter
-                        if 'Week of Year' in features_to_extract:
-                            df[f'{date_col}_weekofyear'] = df[date_col].dt.isocalendar().week
-                        if 'Is Weekend' in features_to_extract:
-                            df[f'{date_col}_is_weekend'] = (df[date_col].dt.dayofweek >= 5).astype(int)
-                        st.session_state['engineered_df'] = df
-                        st.success(f'✅ Extracted {len(features_to_extract)} date features')
-                        new_cols = [c for c in df.columns if c.startswith(f'{date_col}_')]
-                        st.dataframe(df[[date_col] + new_cols].head())
-                    except Exception as e:
-                        st.error(f'Failed to extract date features: {e}')
-        else:
-            st.warning('No date columns detected')
-    elif feature_type == 'Text Features':
-        st.write("Extract features from text columns")
-        text_cols = df.select_dtypes(include='object').columns.tolist()
-        if text_cols:
-            text_col = st.selectbox('Select text column', text_cols)
-            features_to_extract = st.multiselect('Features to extract', ['Length', 'Word Count', 'Contains Digits', 'Contains Special Chars', 'Is Uppercase'])
-            if st.button('Extract Text Features'):
-                try:
-                    if 'Length' in features_to_extract:
-                        df[f'{text_col}_length'] = df[text_col].astype(str).str.len()
-                    if 'Word Count' in features_to_extract:
-                        df[f'{text_col}_word_count'] = df[text_col].astype(str).str.split().str.len()
-                    if 'Contains Digits' in features_to_extract:
-                        df[f'{text_col}_has_digits'] = df[text_col].astype(str).str.contains(r'\d').astype(int)
-                    if 'Contains Special Chars' in features_to_extract:
-                        df[f'{text_col}_has_special'] = df[text_col].astype(str).str.contains(r'[^a-zA-Z0-9\s]').astype(int)
-                    if 'Is Uppercase' in features_to_extract:
-                        df[f'{text_col}_is_upper'] = df[text_col].astype(str).str.isupper().astype(int)
-                    st.session_state['engineered_df'] = df
-                    st.success(f'✅ Extracted {len(features_to_extract)} text features')
-                    new_cols = [c for c in df.columns if c.startswith(f'{text_col}_')]
-                    st.dataframe(df[[text_col] + new_cols].head())
-                except Exception as e:
-                    st.error(f'Failed to extract text features: {e}')
-        else:
-            st.warning('No text columns available')
-    elif feature_type == 'AI-Suggested Features':
-        st.write("Get AI suggestions for feature engineering")
-        if not groq_token:
-            st.error('❌ Please provide Groq API Key in sidebar')
-        else:
-            if st.button('🤖 Get AI Feature Engineering Suggestions'):
-                with st.spinner('Analyzing dataset for feature engineering opportunities...'):
-                    try:
-                        prompt = f"""You are a data science expert. Analyze this dataset and suggest feature engineering opportunities.
+    st.subheader('🤖 AI Feature Engineering Assistant')
+    
+    st.write("""
+    The AI will analyze your dataset and automatically create valuable features based on:
+    - Column types and relationships
+    - Target variable (if specified)
+    - Domain knowledge inferred from column names
+    - Statistical patterns in the data
+    """)
+    
+    target_col = st.session_state.get('target_column', None)
+    if target_col:
+        st.info(f"🎯 Target variable: **{target_col}** ({st.session_state.get('problem_type', 'Unknown')})")
+    else:
+        st.warning('⚠️ No target variable set. Go to Preprocess tab to set target for better feature suggestions.')
+    
+    st.markdown('---')
+    
+    if st.button('🚀 Generate AI Features', type='primary'):
+        with st.spinner('🤖 AI is analyzing your data and creating features...'):
+            try:
+                # Prepare context for AI
+                numeric_cols = df.select_dtypes(include='number').columns.tolist()
+                cat_cols = df.select_dtypes(exclude='number').columns.tolist()
+                
+                # Sample statistics
+                stats_summary = {}
+                for col in numeric_cols[:10]:
+                    stats_summary[col] = {
+                        'mean': float(df[col].mean()),
+                        'std': float(df[col].std()),
+                        'min': float(df[col].min()),
+                        'max': float(df[col].max())
+                    }
+                
+                prompt = f"""You are a data science expert. Analyze this dataset and CREATE SPECIFIC PYTHON CODE to engineer new features.
 
 Dataset Info:
 - Shape: {df.shape}
-- Columns: {list(df.columns[:20])}
-- Numeric columns: {list(df.select_dtypes(include='number').columns[:10])}
-- Categorical columns: {list(df.select_dtypes(exclude='number').columns[:10])}
+- Target: {target_col if target_col else 'Not specified'}
+- Problem Type: {st.session_state.get('problem_type', 'Not specified')}
+- Numeric columns: {numeric_cols[:15]}
+- Categorical columns: {cat_cols[:10]}
 
-Target: {st.session_state.get('target_column', 'Not specified')}
-Problem Type: {st.session_state.get('problem_type', 'Not specified')}
+Sample Statistics:
+{json.dumps(stats_summary, indent=2)}
 
-Provide 5-7 specific feature engineering suggestions:
-1. What mathematical combinations would be valuable?
-2. Which features should be binned and how?
-3. Are there interaction features to create?
-4. What polynomial or log transformations would help?
-5. Any domain-specific features based on column names?
+Generate Python code that creates 5-10 valuable new features. Include:
+1. Mathematical combinations (ratios, products, differences)
+2. Binning of continuous variables
+3. Interaction features between important variables
+4. Polynomial features for key predictors
+5. Domain-specific features based on column names
 
-Be specific and actionable."""
-                        suggestions = groq_generate_text(prompt=prompt, api_key=groq_token, model="llama-3.3-70b-versatile", max_tokens=1000)
-                        st.success('✅ AI suggestions generated!')
-                        st.write(suggestions)
-                    except Exception as e:
-                        st.error(f'Failed to get suggestions: {e}')
+Return ONLY valid Python code that:
+- Assumes df is the DataFrame
+- Creates new columns directly: df['new_feature'] = ...
+- Includes try-except for safety
+- Has comments explaining each feature
+- Does NOT include any markdown or explanation outside code
+
+Example format:
+# Feature 1: Ratio of X to Y
+try:
+    df['x_to_y_ratio'] = df['X'] / (df['Y'] + 1e-10)
+except:
+    pass
+
+Generate complete, runnable code now:"""
+                
+                feature_code = groq_generate_text(
+                    prompt=prompt,
+                    api_key=groq_token,
+                    model="llama-3.3-70b-versatile",
+                    max_tokens=2000,
+                    temperature=0.7
+                )
+                
+                # Clean code
+                if '```python' in feature_code:
+                    feature_code = feature_code.split('```python')[1].split('```')[0].strip()
+                elif '```' in feature_code:
+                    feature_code = feature_code.split('```')[1].split('```')[0].strip()
+                
+                st.success('✅ AI generated feature engineering code!')
+                
+                st.subheader('📝 Generated Code')
+                st.code(feature_code, language='python')
+                
+                st.markdown('---')
+                st.subheader('⚡ Apply Features')
+                
+                if st.button('✅ Execute Feature Engineering'):
+                    with st.spinner('Creating features...'):
+                        try:
+                            # Store original columns
+                            original_cols = set(df.columns)
+                            
+                            # Execute the code
+                            exec(feature_code, {'df': df, 'np': np, 'pd': pd})
+                            
+                            # Find new columns
+                            new_cols = set(df.columns) - original_cols
+                            
+                            if new_cols:
+                                st.session_state['engineered_df'] = df
+                                st.session_state['df'] = df
+                                
+                                st.success(f'✅ Created {len(new_cols)} new features!')
+                                
+                                st.subheader('🎉 New Features')
+                                for col in new_cols:
+                                    st.write(f"- **{col}**")
+                                
+                                st.subheader('📊 Sample Data')
+                                display_cols = list(original_cols)[:5] + list(new_cols)
+                                st.dataframe(df[display_cols].head(10))
+                                
+                                st.info('💾 Features saved! Proceed to Preprocess tab to prepare for modeling.')
+                            else:
+                                st.warning('No new features were created. Try regenerating.')
+                        
+                        except Exception as e:
+                            st.error(f'❌ Failed to execute code: {e}')
+                            st.write('**Debug Info:**')
+                            st.code(str(e))
+                            st.write('Try regenerating the code or check for syntax errors.')
+            
+            except Exception as e:
+                st.error(f'❌ AI feature generation failed: {e}')
+    
     st.markdown('---')
     st.subheader('📊 Current Dataset')
     st.write(f"Shape: **{df.shape[0]:,} rows × {df.shape[1]} columns**")
-    st.dataframe(df.head(10))
+    
+    with st.expander('View Dataset Preview'):
+        st.dataframe(df.head(20))
+    
     col1, col2 = st.columns(2)
     with col1:
-        if st.button('💾 Save Engineered Dataset'):
-            st.session_state['engineered_df'] = df
-            st.session_state['df'] = df
-            st.success('✅ Engineered dataset saved! Use it in preprocessing.')
-    with col2:
         if st.button('🔄 Reset to Original'):
             st.session_state['engineered_df'] = None
             st.info('Reset to original dataset')
             st.rerun()
+    
+    with col2:
+        if st.button('📥 Download Engineered Dataset'):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label='Download CSV',
+                data=csv,
+                file_name=f'engineered_dataset_{uuid.uuid4().hex[:6]}.csv',
+                mime='text/csv'
+            )
 
 elif nav == '🤖 Modeling':
     st.header('5️⃣ Model Training & Evaluation')
