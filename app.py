@@ -365,32 +365,34 @@ elif nav == "Modeling":
 # ---------------- Report ----------------
 elif nav == 'Report':
     st.header('5) Report & Export')
-    if st.session_state['df'] is None:
+
+    if st.session_state.get('df') is None:
         st.info('Please upload dataset first')
-    else:
-        df = st.session_state['df']
-        model_res = st.session_state.get('model_result')
-        
-        st.subheader('Generate Executive Summary with AI')
-        
-        # Prepare summary data
-        eda_summary = {
-            'rows': int(df.shape[0]),
-            'columns': int(df.shape[1]),
-            'numeric_columns': int(len(df.select_dtypes(include='number').columns)),
-            'categorical_columns': int(len(df.select_dtypes(exclude='number').columns)),
-            'total_missing': int(df.isna().sum().sum()),
-            'missing_percentage': f"{(df.isna().sum().sum() / (df.shape[0] * df.shape[1]) * 100):.2f}%"
-        }
-        
-        if st.button('Generate Executive Summary (Groq AI)'):
-            if not groq_token:
-                st.error('Please provide Groq API Key in the sidebar.')
-            else:
-                try:
-                    with st.spinner('Generating AI summary...'):
-                        # Create detailed prompt
-                        prompt = f"""You are a professional data scientist writing an executive summary for a machine learning project.
+        st.stop()
+
+    df = st.session_state['df']
+    model_res = st.session_state.get('model_result')
+    problem_type = st.session_state.get('problem_type')
+
+    st.subheader('Generate Executive Summary with AI')
+
+    # Prepare summary data
+    eda_summary = {
+        'rows': int(df.shape[0]),
+        'columns': int(df.shape[1]),
+        'numeric_columns': int(len(df.select_dtypes(include='number').columns)),
+        'categorical_columns': int(len(df.select_dtypes(exclude='number').columns)),
+        'total_missing': int(df.isna().sum().sum()),
+        'missing_percentage': f"{(df.isna().sum().sum() / (df.shape[0] * df.shape[1]) * 100):.2f}%"
+    }
+
+    if st.button('Generate Executive Summary (Groq AI)'):
+        if not groq_token:
+            st.error('Please provide Groq API Key in the sidebar.')
+        else:
+            try:
+                with st.spinner('Generating AI summary...'):
+                    prompt = f"""You are a professional data scientist writing an executive summary for a machine learning project.
 
 Dataset Overview:
 - Rows: {eda_summary['rows']}
@@ -406,55 +408,91 @@ Write a concise executive summary (3-4 paragraphs) covering:
 1. Dataset characteristics and quality
 2. Preprocessing and data preparation steps
 3. Model performance and key findings
-4. Recommendations for based on result from the model
+4. Recommendations based on results from the model
 
 Keep it professional and actionable."""
-                        
-                        exec_summary = groq_generate_text(
-                            prompt=prompt,
-                            api_key=groq_token,
-                            model="llama-3.3-70b-versatile",
-                            max_tokens=1000
-                        )
-                        
-                        st.success('Summary generated!')
-                        st.text_area('Executive Summary', value=exec_summary, height=400)
-                        
-                        # Store in session state
-                        st.session_state['exec_summary'] = exec_summary
-                        
-                except Exception as e:
-                    st.error(f'Failed to generate summary: {e}')
-        
-        # Export report
-        if 'exec_summary' in st.session_state:
-            st.markdown('---')
-            st.subheader('Export Report')
-            
-            if st.button('📄 Generate Word Report (.docx)'):
-                try:
-                    with st.spinner('Creating Word document...'):
-                        report_path = create_docx_report(
-                            title=f'ML Project Report - {uuid.uuid4().hex[:6]}',
-                            executive_summary=st.session_state['exec_summary'],
-                            eda_summary=eda_summary,
-                            model_summary=str(model_res) if model_res else "No model results available",
-                            charts=[]
-                        )
-                        
-                        # Read and encode file
-                        with open(report_path, 'rb') as f:
-                            data = f.read()
-                        
-                        st.success('Report generated!')
-                        
-                        # Download button
-                        st.download_button(
-                            label="📥 Download Report",
-                            data=data,
-                            file_name=f"ml_report_{uuid.uuid4().hex[:6]}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
-                        
-                except Exception as e:
-                    st.error(f'Failed to create report: {e}')
+
+                    exec_summary = groq_generate_text(
+                        prompt=prompt,
+                        api_key=groq_token,
+                        model="llama-3.3-70b-versatile",
+                        max_tokens=1000
+                    )
+
+                    st.success('Summary generated!')
+                    st.text_area('Executive Summary', value=exec_summary, height=400)
+
+                    # Store in session state
+                    st.session_state['exec_summary'] = exec_summary
+
+            except Exception as e:
+                st.error(f'Failed to generate summary: {e}')
+
+    # Prepare Confusion Matrix Table and Heatmap
+    cm_table_str = None
+    cm_image_path = None
+
+    if model_res and problem_type == "classification" and model_res.get("metrics"):
+        cm = np.array(model_res["metrics"]["confusion_matrix"])
+        report_dict = model_res["metrics"]["classification_report"]
+
+        # Extract class labels
+        class_labels = [k for k in report_dict.keys() if k not in ["accuracy", "macro avg", "weighted avg"]]
+
+        # Build confusion matrix DataFrame
+        cm_df = pd.DataFrame(cm, index=class_labels, columns=class_labels)
+        cm_table_str = cm_df.to_string()
+
+        # Plot heatmap
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(cm_df, annot=True, fmt="d", cmap="Blues", ax=ax)
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+        ax.set_title("Confusion Matrix")
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+
+        # Save to temporary file for Word export
+        cm_image_path = f"cm_heatmap_{uuid.uuid4().hex[:6]}.png"
+        fig.savefig(cm_image_path, bbox_inches='tight')
+        plt.close(fig)
+
+        # Show in Streamlit
+        st.subheader("Confusion Matrix")
+        st.markdown("### Table")
+        st.dataframe(cm_df, use_container_width=True)
+        st.markdown("### Heatmap")
+        st.pyplot(fig)
+
+    # Export report
+    if 'exec_summary' in st.session_state:
+        st.markdown('---')
+        st.subheader('Export Report')
+
+        if st.button('📄 Generate Word Report (.docx)'):
+            try:
+                with st.spinner('Creating Word document...'):
+                    report_path = create_docx_report(
+                        title=f'ML Project Report - {uuid.uuid4().hex[:6]}',
+                        executive_summary=st.session_state['exec_summary'],
+                        eda_summary=eda_summary,
+                        model_summary=str(model_res) if model_res else "No model results available",
+                        charts=[cm_image_path] if cm_image_path else [],
+                        additional_text=[f"Confusion Matrix Table:\n{cm_table_str}"] if cm_table_str else []
+                    )
+
+                    # Read and encode file
+                    with open(report_path, 'rb') as f:
+                        data = f.read()
+
+                    st.success('Report generated!')
+
+                    st.download_button(
+                        label="📥 Download Report",
+                        data=data,
+                        file_name=f"ml_report_{uuid.uuid4().hex[:6]}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+
+            except Exception as e:
+                st.error(f'Failed to create report: {e}')
