@@ -606,7 +606,7 @@ elif nav == 'Modeling':
                 st.code(traceback.format_exc())
 
 # ---------------- Report ----------------
-elif nav == '📄 Report':
+elif nav == 'Report':
     st.header('Generate Comprehensive Report')
     
     if st.session_state['df'] is None:
