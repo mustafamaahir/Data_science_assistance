@@ -8,6 +8,9 @@ from llm import groq_generate_text
 import pandas as pd
 import json
 import uuid
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 
 
 st.set_page_config(page_title="Data Science Assistant", layout="wide")
@@ -216,7 +219,7 @@ elif nav == "Modeling":
         st.warning("Please run preprocessing first (Preprocess tab).")
         st.stop()
 
-    # Load from session state (IMPORTANT)
+    # Load from session state
     X_processed = st.session_state["X_processed"]
     y = st.session_state["y"]
     problem_type = st.session_state["problem_type"]
@@ -278,7 +281,6 @@ elif nav == "Modeling":
     st.subheader("Training Options")
 
     tune = st.checkbox("Enable hyperparameter tuning (RandomizedSearchCV)")
-
     n_iter = st.number_input("n_iter", 5, 200, 20) if tune else 10
     cv = st.number_input("CV folds", 2, 10, 5) if tune else 5
 
@@ -299,15 +301,60 @@ elif nav == "Modeling":
                 )
 
                 st.session_state["model_result"] = res
-
                 st.success("Training complete!")
 
+                # METRICS TABLE
                 st.subheader("Model Performance")
                 st.dataframe(pd.DataFrame([res["metrics"]]))
 
                 if tune and "best_params" in res:
                     st.subheader("Best Hyperparameters")
                     st.json(res["best_params"])
+
+                # CONFUSION MATRIX (CLASSIFICATION ONLY)
+                if problem_type == "classification":
+                    st.markdown("---")
+                    st.subheader("Confusion Matrix")
+
+                    cm = np.array(res["metrics"]["confusion_matrix"])
+                    report = res["metrics"]["classification_report"]
+
+                    class_labels = [
+                        k for k in report.keys()
+                        if k not in ["accuracy", "macro avg", "weighted avg"]
+                    ]
+
+                    cm_df = pd.DataFrame(
+                        cm,
+                        index=class_labels,
+                        columns=class_labels
+                    )
+
+                    st.markdown("### Confusion Matrix (Table)")
+                    st.dataframe(cm_df, use_container_width=True)
+
+                    st.markdown("### Confusion Matrix (Heatmap)")
+                    fig, ax = plt.subplots(figsize=(10, 8))
+
+                    sns.heatmap(
+                        cm_df,
+                        annot=True,
+                        fmt="d",
+                        cmap="Blues",
+                        linewidths=0.5,
+                        linecolor="gray",
+                        cbar=True,
+                        ax=ax
+                    )
+
+                    ax.set_xlabel("Predicted Label")
+                    ax.set_ylabel("True Label")
+                    ax.set_title("Confusion Matrix")
+
+                    plt.xticks(rotation=45, ha="right")
+                    plt.yticks(rotation=0)
+
+                    st.pyplot(fig)
 
         except Exception as e:
             st.error(f"Training failed: {e}")
