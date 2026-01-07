@@ -3,11 +3,14 @@ import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import KNNImputer
+from sklearn.impute import SimpleImputer, KNNImputer
+# Enable experimental feature BEFORE importing
+from sklearn.experimental import enable_iterative_imputer  # noqa
 from sklearn.impute import IterativeImputer
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import FunctionTransformer
+from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from scipy.stats import chi2_contingency
+import streamlit as st
 
 
 def test_mcar(df: pd.DataFrame, col: str) -> dict:
@@ -37,17 +40,20 @@ def test_mcar(df: pd.DataFrame, col: str) -> dict:
             return {'is_mcar': True, 'p_value': 1.0, 'method': 'insufficient_data'}
         
         # Chi-square test with first categorical column
-        contingency = pd.crosstab(
-            df_temp['missing_indicator'], 
-            df_temp[cat_cols[0]]
-        )
-        chi2, p_value, _, _ = chi2_contingency(contingency)
-        
-        return {
-            'is_mcar': p_value > 0.05,
-            'p_value': float(p_value),
-            'method': 'chi_square'
-        }
+        try:
+            contingency = pd.crosstab(
+                df_temp['missing_indicator'], 
+                df_temp[cat_cols[0]]
+            )
+            chi2, p_value, _, _ = chi2_contingency(contingency)
+            
+            return {
+                'is_mcar': p_value > 0.05,
+                'p_value': float(p_value),
+                'method': 'chi_square'
+            }
+        except:
+            return {'is_mcar': True, 'p_value': 1.0, 'method': 'chi_square_failed'}
     
     # Correlation test for numeric columns
     correlations = []
@@ -202,30 +208,36 @@ def smart_impute_column(
             return df[col].fillna(df[col].mode()[0] if len(df[col].mode()) > 0 else 'Unknown')
     
     elif method == 'knn' and is_numeric:
-        numeric_cols = df.select_dtypes(include='number').columns.tolist()
-        knn_imputer = KNNImputer(n_neighbors=n_neighbors)
-        df_numeric = df[numeric_cols].copy()
-        df_imputed = pd.DataFrame(
-            knn_imputer.fit_transform(df_numeric),
-            columns=numeric_cols,
-            index=df_numeric.index
-        )
-        return df_imputed[col]
+        try:
+            numeric_cols = df.select_dtypes(include='number').columns.tolist()
+            knn_imputer = KNNImputer(n_neighbors=n_neighbors)
+            df_numeric = df[numeric_cols].copy()
+            df_imputed = pd.DataFrame(
+                knn_imputer.fit_transform(df_numeric),
+                columns=numeric_cols,
+                index=df_numeric.index
+            )
+            return df_imputed[col]
+        except:
+            return df[col].fillna(df[col].median())
     
     elif method == 'regression' and is_numeric:
-        numeric_cols = df.select_dtypes(include='number').columns.tolist()
-        reg_imputer = IterativeImputer(
-            random_state=42,
-            max_iter=10,
-            estimator=RandomForestRegressor(n_estimators=10, random_state=42)
-        )
-        df_numeric = df[numeric_cols].copy()
-        df_imputed = pd.DataFrame(
-            reg_imputer.fit_transform(df_numeric),
-            columns=numeric_cols,
-            index=df_numeric.index
-        )
-        return df_imputed[col]
+        try:
+            numeric_cols = df.select_dtypes(include='number').columns.tolist()
+            reg_imputer = IterativeImputer(
+                random_state=42,
+                max_iter=10,
+                estimator=RandomForestRegressor(n_estimators=10, random_state=42)
+            )
+            df_numeric = df[numeric_cols].copy()
+            df_imputed = pd.DataFrame(
+                reg_imputer.fit_transform(df_numeric),
+                columns=numeric_cols,
+                index=df_numeric.index
+            )
+            return df_imputed[col]
+        except:
+            return df[col].fillna(df[col].median())
     
     else:
         # Fallback
@@ -354,6 +366,7 @@ def comprehensive_preprocessing(
             transformers.append(('num', Pipeline(num_steps), num_cols))
         else:
             # No scaling, just pass through
+            from sklearn.preprocessing import FunctionTransformer
             transformers.append(('num', FunctionTransformer(), num_cols))
     
     if cat_cols:
