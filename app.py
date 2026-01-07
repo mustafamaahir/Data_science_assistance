@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from eda import quick_eda, run_full_profile
-from preprocessing import build_preprocessor
+from preprocessing import build_preprocessor, handle_target_missingness, missing_summary
 from models import get_model, tune_model
 from report import create_docx_report
 from llm import groq_generate_text
@@ -100,64 +100,105 @@ elif nav == 'EDA & Profiling':
             st.components.v1.html(profile_html, height=700, scrolling=True)
 
 # ---------------- Preprocess ----------------
-elif nav == 'Preprocess':
-    st.header('3) Preprocessing')
-    if st.session_state['df'] is None:
-        st.info('Please upload a dataset first.')
-    else:
-        df = st.session_state['df']
-        
-        # Select target column first
-        st.subheader('Select Target Column')
-        target = st.selectbox('Choose target column for modeling', options=[None] + list(df.columns))
-        
-        if target:
-            st.session_state['target_column'] = target
-            
-            # Show data overview
-            st.subheader('Data Overview')
-            info_df = pd.DataFrame({
-                'dtype': df.dtypes.astype(str), 
-                'missing': df.isna().sum(),
-                'missing_%': (df.isna().sum() / len(df) * 100).round(2)
-            })
-            st.dataframe(info_df)
-            
-            st.markdown('---')
-            st.subheader('Preprocessing Options')
-            num_strategy = st.selectbox('Numeric imputation strategy', ['median', 'mean', 'most_frequent'], index=0)
-            cat_strategy = st.selectbox('Categorical imputation strategy', ['most_frequent', 'constant'], index=0)
-            scale_numeric = st.checkbox('Scale numeric features (StandardScaler)', value=True)
-            
-            if st.button('Build & Apply Preprocessor'):
-                try:
-                    with st.spinner('Building preprocessing pipeline...'):
-                        # Separate features and target
-                        X = df.drop(columns=[target])
-                        y = df[target]
-                        
-                        # Build preprocessor
-                        preprocessor = build_preprocessor(
-                            X, 
-                            num_strategy=num_strategy, 
-                            cat_strategy=cat_strategy, 
-                            scale_numeric=scale_numeric
-                        )
-                        
-                        # Fit and transform
-                        X_processed = preprocessor.fit_transform(X)
-                        
-                        # Store in session state
-                        st.session_state['preprocessor'] = preprocessor
-                        st.session_state['processed_df'] = X_processed
-                        
-                        st.success(f'✅ Preprocessing complete! Shape: {X_processed.shape}')
-                        st.info(f'Target column "{target}" has been separated and stored.')
-                        
-                except Exception as e:
-                    st.error(f'Preprocessing failed: {e}')
-        else:
-            st.warning('Please select a target column to proceed.')
+elif nav == "Preprocess":
+    st.header("3) Preprocessing")
+
+    if st.session_state["df"] is None:
+        st.info("Please upload a dataset first.")
+        st.stop()
+
+    df = st.session_state["df"]
+
+    # Target selection
+    st.subheader("Select Target Column")
+    target = st.selectbox(
+        "Choose target column for modeling",
+        options=[None] + list(df.columns)
+    )
+
+    if not target:
+        st.warning("Please select a target column to proceed.")
+        st.stop()
+
+    st.session_state["target_column"] = target
+
+    # Missingness overview (BEFORE preprocessing)
+    st.subheader("Missingness Overview (Before Imputation)")
+    st.dataframe(missing_summary(df))
+
+    st.markdown("---")
+    st.subheader("Preprocessing Options")
+
+    num_strategy = st.selectbox(
+        "Numeric imputation strategy",
+        ["median", "mean", "most_frequent"]
+    )
+
+    cat_strategy = st.selectbox(
+        "Categorical imputation strategy",
+        ["most_frequent", "constant"]
+    )
+
+    scale_numeric = st.checkbox(
+        "Scale numeric features (StandardScaler)",
+        value=True
+    )
+
+    if st.button("Build & Apply Preprocessor"):
+
+        try:
+            with st.spinner("Applying preprocessing logic..."):
+
+                # Infer problem type
+                problem_type = (
+                    "classification"
+                    if df[target].dtype == "object"
+                    or df[target].nunique() < 20
+                    else "regression"
+                )
+
+                # Handle target missingness FIRST
+                df_clean, y = handle_target_missingness(
+                    df=df,
+                    target=target,
+                    problem_type=problem_type,
+                    drop_threshold=0.05
+                )
+
+                # Split X and y
+                X = df_clean.drop(columns=[target])
+
+                # Build feature preprocessor
+                preprocessor = build_preprocessor(
+                    X,
+                    num_strategy=num_strategy,
+                    cat_strategy=cat_strategy,
+                    scale_numeric=scale_numeric
+                )
+
+                # Transform X
+                X_processed = preprocessor.fit_transform(X)
+
+                # Convert to DataFrame
+                feature_names = preprocessor.get_feature_names_out()
+                X_processed = pd.DataFrame(
+                    X_processed,
+                    columns=feature_names,
+                    index=X.index
+                )
+
+                # Store
+                st.session_state["preprocessor"] = preprocessor
+                st.session_state["X_processed"] = X_processed
+                st.session_state["y"] = y.reset_index(drop=True)
+                st.session_state["problem_type"] = problem_type
+
+                st.success(
+                    f"Preprocessing complete — Shape: {X_processed.shape}"
+                )
+
+        except Exception as e:
+            st.error(f"Preprocessing failed: {e}")
 
 # ---------------- Modeling ----------------
 elif nav == 'Modeling':
