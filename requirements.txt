@@ -9,3 +9,5 @@ python-docx
 requests
 openpyxl
 xgboost
+scipy
+python-dotenv

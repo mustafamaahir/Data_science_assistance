@@ -1,6 +1,7 @@
 import requests
 
-def groq_generate_text(prompt: str, api_key: str, model: str = "llama-3.3-70b-versatile", max_tokens: int = 1000):
+
+def groq_generate_text(prompt: str, api_key: str, model: str = "llama-3.3-70b-versatile", max_tokens: int = 1000, temperature: float = 0.7):
     """
     Call Groq API for text generation.
     
@@ -9,6 +10,7 @@ def groq_generate_text(prompt: str, api_key: str, model: str = "llama-3.3-70b-ve
         api_key: Groq API key
         model: Model ID (default: llama-3.3-70b-versatile)
         max_tokens: Maximum tokens to generate
+        temperature: Sampling temperature (0-1)
     
     Returns:
         Generated text string
@@ -24,16 +26,20 @@ def groq_generate_text(prompt: str, api_key: str, model: str = "llama-3.3-70b-ve
         "model": model,
         "messages": [
             {
+                "role": "system",
+                "content": "You are an expert data scientist and machine learning engineer with deep knowledge of statistics, model development, and best practices."
+            },
+            {
                 "role": "user",
                 "content": prompt
             }
         ],
         "max_tokens": max_tokens,
-        "temperature": 0.7
+        "temperature": temperature
     }
     
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp = requests.post(url, headers=headers, json=payload, timeout=90)
         
         if resp.status_code == 200:
             result = resp.json()
