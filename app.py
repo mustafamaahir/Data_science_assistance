@@ -1,10 +1,10 @@
 import streamlit as st
 import os
 from eda import quick_eda, run_full_profile, create_eda_charts
-from preprocessing import comprehensive_preprocessing, missing_summary, test_mcar, compare_imputation_methods
+from preprocessing import comprehensive_preprocessing, missing_summary, compare_imputation_methods
 from models import get_model, tune_model
 from report import create_comprehensive_report
-from llm import groq_generate_text, generate_feature_insights, generate_code_notebook
+from code_generator import groq_generate_text, generate_feature_insights, generate_code_notebook
 import pandas as pd
 import json
 import uuid

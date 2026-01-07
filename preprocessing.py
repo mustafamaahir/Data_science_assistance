@@ -3,14 +3,11 @@ import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.impute import KNNImputer
 # Enable experimental feature BEFORE importing
-from sklearn.experimental import enable_iterative_imputer  # noqa
 from sklearn.impute import IterativeImputer
-from sklearn.model_selection import cross_val_score
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor
 from scipy.stats import chi2_contingency
-import streamlit as st
 
 
 def test_mcar(df: pd.DataFrame, col: str) -> dict:
