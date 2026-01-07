@@ -4,7 +4,6 @@ numpy
 matplotlib
 seaborn<0.13
 scikit-learn
-ydata-profiling
 python-docx
 requests
 openpyxl

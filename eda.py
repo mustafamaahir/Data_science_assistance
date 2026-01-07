@@ -4,7 +4,6 @@ import seaborn as sns
 import numpy as np
 import os
 from datetime import datetime
-from ydata_profiling import ProfileReport
 
 # Set style
 sns.set_style('whitegrid')
@@ -30,7 +29,7 @@ def quick_eda(df: pd.DataFrame):
     # Distribution of numeric features
     numeric_df = df.select_dtypes(include='number')
     if not numeric_df.empty:
-        n_cols = min(len(numeric_df.columns), 12)  # Limit to 12 for readability
+        n_cols = min(len(numeric_df.columns), 12)
         n_rows = (n_cols + 2) // 3
         
         fig1, axes1 = plt.subplots(
@@ -45,7 +44,6 @@ def quick_eda(df: pd.DataFrame):
             axes1[i].set_title(f'{col}\n(mean={numeric_df[col].mean():.2f})', fontsize=10)
             axes1[i].set_xlabel('')
         
-        # Hide empty subplots
         for j in range(i + 1, len(axes1)):
             axes1[j].axis('off')
         
@@ -85,7 +83,6 @@ def quick_eda(df: pd.DataFrame):
         ax3.set_title('Top 20 Columns with Missing Values', fontsize=14, fontweight='bold')
         ax3.invert_yaxis()
         
-        # Add value labels
         for i, bar in enumerate(bars):
             width = bar.get_width()
             percentage = (width / len(df)) * 100
@@ -180,7 +177,7 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
         plt.close()
         chart_paths.append(path2)
     
-    # 3. Categorical distributions (top categories)
+    # 3. Categorical distributions
     cat_cols = df.select_dtypes(exclude='number').columns[:8]
     if len(cat_cols) > 0:
         n_rows = (len(cat_cols) + 1) // 2
@@ -203,13 +200,12 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
         plt.close()
         chart_paths.append(path3)
     
-    # 4. Correlation heatmap (high-res)
+    # 4. Correlation heatmap
     numeric_df = df.select_dtypes(include='number')
     if numeric_df.shape[1] > 1:
         fig4, ax4 = plt.subplots(figsize=(14, 12))
         corr = numeric_df.corr()
         
-        # Mask upper triangle
         mask = np.triu(np.ones_like(corr, dtype=bool))
         
         sns.heatmap(
@@ -231,7 +227,7 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
         plt.close()
         chart_paths.append(path4)
     
-    # 5. Statistical summary table (as image)
+    # 5. Statistical summary table
     numeric_df = df.select_dtypes(include='number')
     if not numeric_df.empty:
         fig5, ax5 = plt.subplots(figsize=(14, max(6, len(numeric_df.columns) * 0.4)))
@@ -253,12 +249,10 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
         table.set_fontsize(9)
         table.scale(1, 2)
         
-        # Style header
         for i in range(len(stats_df.columns)):
             table[(0, i)].set_facecolor('#40466e')
             table[(0, i)].set_text_props(weight='bold', color='white')
         
-        # Style row labels
         for i in range(1, len(stats_df) + 1):
             table[(i, -1)].set_facecolor('#f0f0f0')
             table[(i, -1)].set_text_props(weight='bold')
@@ -276,8 +270,9 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
 
 
 def run_full_profile(df: pd.DataFrame):
-    """Generate full profiling report using ydata-profiling."""
+    """Generate full profiling report using ydata-profiling (with fallback)."""
     try:
+        from ydata_profiling import ProfileReport
         
         profile = ProfileReport(
             df, 
@@ -290,6 +285,24 @@ def run_full_profile(df: pd.DataFrame):
         return report_html
     
     except ImportError:
-        return "<h1>Error: ydata-profiling not installed</h1><p>Install with: pip install ydata-profiling</p>"
+        return """
+        <div style='padding: 20px; background-color: #f0f0f0; border-radius: 10px;'>
+            <h1 style='color: #d9534f;'>⚠️ ydata-profiling not available</h1>
+            <p><strong>Note:</strong> ydata-profiling requires Python 3.12 or lower.</p>
+            <p>You're using Python 3.13, which is not yet supported.</p>
+            <p><strong>Alternative:</strong> Use the Quick EDA section for comprehensive visualizations.</p>
+            <p>To use ydata-profiling, please:</p>
+            <ul>
+                <li>Use Python 3.11 or 3.12</li>
+                <li>Or run locally: <code>pip install ydata-profiling</code></li>
+            </ul>
+        </div>
+        """
     except Exception as e:
-        return f"<h1>Error generating profile</h1><p>{str(e)}</p>"
+        return f"""
+        <div style='padding: 20px; background-color: #fff3cd; border-radius: 10px;'>
+            <h1 style='color: #856404;'>⚠️ Error generating profile</h1>
+            <p><strong>Error:</strong> {str(e)}</p>
+            <p>Please use the Quick EDA section instead.</p>
+        </div>
+        """
