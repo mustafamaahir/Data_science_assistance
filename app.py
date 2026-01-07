@@ -6,10 +6,9 @@ from models import get_model, tune_model
 from report import create_docx_report
 from llm import groq_generate_text
 import pandas as pd
-import base64
 import json
 import uuid
-import numpy as np
+
 
 st.set_page_config(page_title="Data Science Assistant", layout="wide")
 st.title("Data Science Assistant")
@@ -264,7 +263,7 @@ elif nav == 'Modeling':
                     # Store results
                     st.session_state['model_result'] = res
                     
-                    st.success('✅ Training complete!')
+                    st.success('Training complete!')
                     
                     # Display metrics
                     st.subheader('Model Performance')
