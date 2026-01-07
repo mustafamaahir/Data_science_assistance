@@ -201,125 +201,119 @@ elif nav == "Preprocess":
             st.error(f"Preprocessing failed: {e}")
 
 # ---------------- Modeling ----------------
-elif nav == 'Modeling':
-    st.header('4) Modeling & Hyperparameter Tuning')
-    if st.session_state['df'] is None:
-        st.info('Please upload a dataset first.')
-    elif st.session_state['target_column'] is None:
-        st.warning('Please select a target column in the Preprocess tab.')
-    elif st.session_state['processed_df'] is None:
-        st.warning('Please run preprocessing first (Preprocess tab).')
+elif nav == "Modeling":
+    st.header("4) Modeling & Hyperparameter Tuning")
+
+    if st.session_state.get("df") is None:
+        st.info("Please upload a dataset first.")
+        st.stop()
+
+    if "target_column" not in st.session_state:
+        st.warning("Please select a target column in the Preprocess tab.")
+        st.stop()
+
+    if "X_processed" not in st.session_state:
+        st.warning("Please run preprocessing first (Preprocess tab).")
+        st.stop()
+
+    # Load from session state (IMPORTANT)
+    X_processed = st.session_state["X_processed"]
+    y = st.session_state["y"]
+    problem_type = st.session_state["problem_type"]
+
+    st.info(f"🎯 Problem type: **{problem_type.capitalize()}**")
+
+    st.markdown("---")
+    st.subheader("Model Selection")
+
+    if problem_type == "classification":
+        model_options = ["RandomForest", "LogisticRegression", "XGBoost", "SVM"]
     else:
-        df = st.session_state['df']
-        target = st.session_state['target_column']
-        X_processed = st.session_state['processed_df']
-        
-        # Get target variable
-        y = df[target]
-        
-        # Detect problem type
-        if y.dtype == 'object' or y.nunique() <= 20:
-            problem_type = 'classification'
-            st.info(f'🎯 Problem type: **Classification** ({y.nunique()} classes)')
-        else:
-            problem_type = 'regression'
-            st.info(f'🎯 Problem type: **Regression**')
-        
-        st.markdown('---')
-        st.subheader('Model Selection')
-        
-        if problem_type == 'classification':
-            model_options = ['RandomForest', 'LogisticRegression', 'XGBoost', 'SVM']
-        else:
-            model_options = ['RandomForest', 'LinearRegression', 'XGBoost', 'SVR']
-        
-        model_name = st.selectbox('Choose Model', model_options)
-        
-        # Hyperparameters UI
-        st.markdown('### Hyperparameters')
-        param_preset = {}
-        
-        if model_name == 'RandomForest':
-            n_estimators = st.slider('n_estimators', 10, 500, 100)
-            max_depth = st.slider('max_depth (0 = None)', 0, 50, 0)
-            param_preset = {
-                'n_estimators': n_estimators, 
-                'max_depth': None if max_depth == 0 else max_depth,
-                'random_state': 42
-            }
-        
-        elif model_name == 'XGBoost':
-            n_estimators = st.slider('n_estimators', 10, 500, 100)
-            max_depth = st.slider('max_depth', 1, 20, 6)
-            learning_rate = st.number_input('learning_rate', 0.001, 1.0, 0.1, format="%.3f")
-            param_preset = {
-                'n_estimators': n_estimators, 
-                'max_depth': max_depth, 
-                'learning_rate': learning_rate,
-                'random_state': 42
-            }
-        
-        elif model_name == 'LogisticRegression':
-            C = st.number_input('C (inverse regularization)', 0.0001, 1000.0, 1.0, format="%.4f")
-            param_preset = {'C': C, 'random_state': 42, 'max_iter': 1000}
-        
-        elif model_name == 'LinearRegression':
-            st.info('LinearRegression has no hyperparameters to tune.')
-            param_preset = {}
-        
-        elif model_name in ['SVM', 'SVR']:
-            C = st.number_input('C', 0.0001, 1000.0, 1.0, format="%.4f")
-            kernel = st.selectbox('kernel', ['rbf', 'linear', 'poly'])
-            param_preset = {'C': C, 'kernel': kernel}
-        
-        st.markdown('---')
-        st.subheader('Training Options')
-        tune = st.checkbox('Enable hyperparameter tuning (RandomizedSearchCV)', value=False)
-        
-        if tune:
-            n_iter = st.number_input('n_iter for RandomizedSearchCV', min_value=5, max_value=200, value=20)
-            cv = st.number_input('CV folds', min_value=2, max_value=10, value=5)
-        else:
-            n_iter = 10
-            cv = 5
-        
-        if st.button('🚀 Train & Evaluate Model'):
-            try:
-                with st.spinner('Training model — this may take a while...'):
-                    # Get model
-                    result = get_model(model_name, param_preset, problem_type)
-                    model_obj = result['model']
-                    
-                    # Train and evaluate
-                    res = tune_model(
-                        model_obj, 
-                        X_processed, 
-                        y, 
-                        tune=tune, 
-                        n_iter=n_iter, 
-                        cv=cv,
-                        problem_type=problem_type
-                    )
-                    
-                    # Store results
-                    st.session_state['model_result'] = res
-                    
-                    st.success('Training complete!')
-                    
-                    # Display metrics
-                    st.subheader('Model Performance')
-                    metrics_df = pd.DataFrame([res['metrics']])
-                    st.dataframe(metrics_df, use_container_width=True)
-                    
-                    # Show best params if tuning was enabled
-                    if tune and 'best_params' in res:
-                        st.subheader('Best Hyperparameters Found')
-                        st.json(res['best_params'])
-                    
-            except Exception as e:
-                st.error(f'Training failed: {e}')
-                import traceback
-                st.code(traceback.format_exc())
+        model_options = ["RandomForest", "LinearRegression", "XGBoost", "SVR"]
+
+    model_name = st.selectbox("Choose Model", model_options)
+
+    st.markdown("### Hyperparameters")
+    param_preset = {}
+
+    if model_name == "RandomForest":
+        n_estimators = st.slider("n_estimators", 10, 500, 100)
+        max_depth = st.slider("max_depth (0 = None)", 0, 50, 0)
+        param_preset = {
+            "n_estimators": n_estimators,
+            "max_depth": None if max_depth == 0 else max_depth,
+            "random_state": 42
+        }
+
+    elif model_name == "XGBoost":
+        n_estimators = st.slider("n_estimators", 10, 500, 100)
+        max_depth = st.slider("max_depth", 1, 20, 6)
+        learning_rate = st.number_input(
+            "learning_rate", 0.001, 1.0, 0.1, format="%.3f"
+        )
+        param_preset = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "learning_rate": learning_rate,
+            "random_state": 42
+        }
+
+    elif model_name == "LogisticRegression":
+        C = st.number_input("C", 0.0001, 1000.0, 1.0, format="%.4f")
+        param_preset = {
+            "C": C,
+            "random_state": 42,
+            "max_iter": 1000
+        }
+
+    elif model_name == "LinearRegression":
+        st.info("LinearRegression has no hyperparameters.")
+
+    elif model_name in ["SVM", "SVR"]:
+        C = st.number_input("C", 0.0001, 1000.0, 1.0, format="%.4f")
+        kernel = st.selectbox("kernel", ["rbf", "linear", "poly"])
+        param_preset = {"C": C, "kernel": kernel}
+
+    st.markdown("---")
+    st.subheader("Training Options")
+
+    tune = st.checkbox("Enable hyperparameter tuning (RandomizedSearchCV)")
+
+    n_iter = st.number_input("n_iter", 5, 200, 20) if tune else 10
+    cv = st.number_input("CV folds", 2, 10, 5) if tune else 5
+
+    if st.button("🚀 Train & Evaluate Model"):
+        try:
+            with st.spinner("Training model..."):
+                result = get_model(model_name, param_preset, problem_type)
+                model_obj = result["model"]
+
+                res = tune_model(
+                    model_obj,
+                    X_processed,
+                    y,
+                    tune=tune,
+                    n_iter=n_iter,
+                    cv=cv,
+                    problem_type=problem_type
+                )
+
+                st.session_state["model_result"] = res
+
+                st.success("Training complete!")
+
+                st.subheader("Model Performance")
+                st.dataframe(pd.DataFrame([res["metrics"]]))
+
+                if tune and "best_params" in res:
+                    st.subheader("Best Hyperparameters")
+                    st.json(res["best_params"])
+
+        except Exception as e:
+            st.error(f"Training failed: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+
 
 # ---------------- Report ----------------
 elif nav == 'Report':
@@ -365,7 +359,7 @@ Write a concise executive summary (3-4 paragraphs) covering:
 1. Dataset characteristics and quality
 2. Preprocessing and data preparation steps
 3. Model performance and key findings
-4. Recommendations for next steps
+4. Recommendations for based on result from the model
 
 Keep it professional and actionable."""
                         
