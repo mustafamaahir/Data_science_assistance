@@ -81,27 +81,38 @@ def get_model(name: str, params: dict, problem_type: str):
     return {"model": model}
 
 
-def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classification', test_size=0.2):
+def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classification'):
     """
     Train and evaluate model with comprehensive metrics.
-    
-    Args:
-        model: sklearn model instance
-        X: Features
-        y: Target variable
-        tune: Whether to perform hyperparameter tuning
-        n_iter: Number of iterations for RandomizedSearchCV
-        cv: Number of cross-validation folds
-        problem_type: 'classification' or 'regression'
-        test_size: Proportion of data to use for testing (default: 0.2)
     """
     # Split data
-    test_size = min(max(test_size, 0.1), 0.4)  # Clamp between 0.1 and 0.4
+    test_size = min(0.2, max(0.1, 100 / len(X)))
     
-    if problem_type == 'classification' and y.nunique() > 1:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
+    warnings_list = []
+    
+    # Check if stratification is possible
+    if problem_type == 'classification':
+        # Count samples per class
+        class_counts = y.value_counts()
+        min_class_count = class_counts.min()
+        
+        # Only stratify if all classes have at least 2 samples
+        if min_class_count >= 2 and y.nunique() > 1:
+            try:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42, stratify=y
+                )
+            except ValueError as e:
+                # Fallback to non-stratified split
+                warnings_list.append("Some classes have too few samples for stratified split. Using random split.")
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42
+                )
+        else:
+            warnings_list.append(f"Classes with single samples detected: {class_counts[class_counts < 2].index.tolist()}. Using random split.")
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=42
+            )
     else:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42
@@ -228,7 +239,8 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
         "model_name": model.__class__.__name__,
         "feature_importance": feature_importance,
         "X_train_shape": X_train.shape,
-        "X_test_shape": X_test.shape
+        "X_test_shape": X_test.shape,
+        "warnings": warnings_list
     }
     
     if best_params:

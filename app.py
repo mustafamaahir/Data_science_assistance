@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from dotenv import load_dotenv
+import streamlit as st
 
 load_dotenv()
 
@@ -84,7 +85,253 @@ elif nav == '📊 EDA & Profiling':
         st.markdown('---')
         st.subheader('🔍 Missing Data Analysis')
         missing_df = missing_summary(df)
-        st.dataframe(missing_df, use_container_width=True)
+        st.dataframe(missing_df, width='stretch')
+        
+        st.markdown('---')
+        st.subheader('💡 AI Data Insights')
+        
+        if st.button('🤖 Generate AI Interpretation of Data', type='primary'):
+            if not groq_token:
+                st.error('❌ Please provide Groq API Key in sidebar')
+            else:
+                with st.spinner('🤖 AI is analyzing your data...'):
+                    try:
+                        # Prepare data summary for AI
+                        numeric_summary = df.select_dtypes(include='number').describe().to_dict()
+                        categorical_info = {}
+                        for col in df.select_dtypes(exclude='number').columns[:5]:
+                            categorical_info[col] = {
+                                'unique': int(df[col].nunique()),
+                                'top_values': df[col].value_counts().head(3).to_dict()
+                            }
+                        
+                        missing_info = {col: f"{pct:.1f}%" for col, pct in (df.isna().mean() * 100).items() if pct > 0}
+                        
+                        correlations = {}
+                        numeric_df = df.select_dtypes(include='number')
+                        if numeric_df.shape[1] > 1:
+                            corr_matrix = numeric_df.corr()
+                            # Get top correlations
+                            for i in range(len(corr_matrix.columns)):
+                                for j in range(i+1, len(corr_matrix.columns)):
+                                    col1, col2 = corr_matrix.columns[i], corr_matrix.columns[j]
+                                    corr_val = corr_matrix.iloc[i, j]
+                                    if abs(corr_val) > 0.5:
+                                        correlations[f"{col1} vs {col2}"] = f"{corr_val:.3f}"
+                        
+                        prompt = f"""You are a data scientist analyzing a dataset. Provide BUSINESS-FOCUSED insights from this exploratory data analysis.
+
+Dataset Overview:
+- Rows: {df.shape[0]:,}
+- Columns: {df.shape[1]}
+- Numeric Features: {len(df.select_dtypes(include='number').columns)}
+- Categorical Features: {len(df.select_dtypes(exclude='number').columns)}
+
+Numeric Features Summary (first 5):
+{json.dumps(dict(list(numeric_summary.items())[:5]), indent=2)}
+
+Categorical Features (first 5):
+{json.dumps(categorical_info, indent=2)}
+
+Missing Data:
+{json.dumps(missing_info, indent=2) if missing_info else "No missing data"}
+
+Strong Correlations (|r| > 0.5):
+{json.dumps(correlations, indent=2) if correlations else "No strong correlations found"}
+
+Provide a comprehensive data analysis (4-5 paragraphs) covering:
+
+1. **Data Quality Assessment**: What's the overall quality? Are there red flags?
+
+2. **Key Patterns & Relationships**: What interesting patterns emerge? Which variables are related?
+
+3. **Business Implications**: What do these patterns tell us about the business/domain?
+
+4. **Data Concerns**: What issues need attention? (missing data, outliers, imbalances)
+
+5. **Recommendations**: What should be done before modeling? What features look promising?
+
+Write for a business audience - focus on what the data MEANS, not just statistics."""
+                        
+                        eda_insights = groq_generate_text(
+                            prompt=prompt,
+                            api_key=groq_token,
+                            model="llama-3.3-70b-versatile",
+                            max_tokens=1500
+                        )
+                        
+                        st.session_state['eda_insights'] = eda_insights
+                        st.success('✅ AI interpretation generated!')
+                        
+                        st.markdown('### 📊 Data Analysis & Insights')
+                        st.write(eda_insights)
+                        
+                    except Exception as e:
+                        st.error(f'Failed to generate insights: {e}')
+        
+        if 'eda_insights' in st.session_state and st.session_state['eda_insights']:
+            with st.expander('📋 View Saved EDA Insights'):
+                st.write(st.session_state['eda_insights'])
+            
+            st.markdown('---')
+            st.subheader('🤖 Agentic AI - Auto-Execute Recommendations')
+            
+            st.info("""
+            **Autonomous Mode**: The AI will automatically implement its own recommendations:
+            - Clean missing data based on MCAR tests
+            - Engineer features based on patterns found
+            - Prepare data for optimal modeling
+            """)
+            
+            if st.button('🚀 Enable Agentic AI (Auto-Execute)', type='primary'):
+                if not groq_token:
+                    st.error('❌ Please provide Groq API Key')
+                else:
+                    with st.spinner('🤖 Agentic AI is taking autonomous actions...'):
+                        try:
+                            progress = st.progress(0)
+                            status = st.empty()
+                            
+                            # Step 1: Generate action plan
+                            status.text('📋 Creating action plan...')
+                            progress.progress(20)
+                            
+                            action_prompt = f"""Based on the EDA insights below, create a DETAILED ACTION PLAN with executable steps.
+
+EDA Insights:
+{st.session_state['eda_insights']}
+
+Dataset Info:
+- Shape: {df.shape}
+- Columns: {list(df.columns[:20])}
+- Missing data: {df.isna().sum().sum()} values
+
+Create a JSON action plan with these steps:
+1. Missing data handling strategy for each column
+2. Feature engineering opportunities
+3. Data transformation needs
+
+Return ONLY valid JSON in this format:
+{{
+  "missing_data_actions": [
+    {{"column": "col_name", "action": "drop/median/mode/knn", "reason": "why"}}
+  ],
+  "feature_engineering": [
+    {{"type": "ratio/binning/interaction", "columns": ["col1", "col2"], "new_name": "name", "reason": "why"}}
+  ],
+  "transformations": [
+    {{"column": "col_name", "transformation": "log/sqrt/standardize", "reason": "why"}}
+  ]
+}}"""
+                            
+                            action_plan_str = groq_generate_text(
+                                prompt=action_prompt,
+                                api_key=groq_token,
+                                model="llama-3.3-70b-versatile",
+                                max_tokens=2000,
+                                temperature=0.3
+                            )
+                            
+                            # Clean JSON
+                            if '```json' in action_plan_str:
+                                action_plan_str = action_plan_str.split('```json')[1].split('```')[0]
+                            elif '```' in action_plan_str:
+                                action_plan_str = action_plan_str.split('```')[1].split('```')[0]
+                            
+                            action_plan = json.loads(action_plan_str.strip())
+                            st.session_state['action_plan'] = action_plan
+                            
+                            status.text('✅ Action plan created')
+                            progress.progress(40)
+                            
+                            # Step 2: Execute missing data handling
+                            status.text('🔧 Handling missing data autonomously...')
+                            df_clean = df.copy()
+                            
+                            for action in action_plan.get('missing_data_actions', []):
+                                col = action['column']
+                                method = action['action']
+                                
+                                if col in df_clean.columns and df_clean[col].isna().sum() > 0:
+                                    if method == 'drop':
+                                        df_clean = df_clean.dropna(subset=[col])
+                                    elif method == 'median':
+                                        df_clean[col].fillna(df_clean[col].median(), inplace=True)
+                                    elif method == 'mode':
+                                        df_clean[col].fillna(df_clean[col].mode()[0] if len(df_clean[col].mode()) > 0 else 'Missing', inplace=True)
+                                    elif method == 'knn':
+                                        # Simple KNN-like: fill with mean of nearest values
+                                        df_clean[col].fillna(df_clean[col].mean(), inplace=True)
+                            
+                            progress.progress(60)
+                            
+                            # Step 3: Execute feature engineering
+                            status.text('🎨 Engineering features autonomously...')
+                            
+                            for feat in action_plan.get('feature_engineering', []):
+                                try:
+                                    feat_type = feat['type']
+                                    cols = feat['columns']
+                                    new_name = feat['new_name']
+                                    
+                                    if all(c in df_clean.columns for c in cols):
+                                        if feat_type == 'ratio' and len(cols) == 2:
+                                            df_clean[new_name] = df_clean[cols[0]] / (df_clean[cols[1]] + 1e-10)
+                                        elif feat_type == 'interaction' and len(cols) == 2:
+                                            df_clean[new_name] = df_clean[cols[0]] * df_clean[cols[1]]
+                                        elif feat_type == 'binning' and len(cols) == 1:
+                                            df_clean[new_name] = pd.qcut(df_clean[cols[0]], q=5, labels=['Q1','Q2','Q3','Q4','Q5'], duplicates='drop')
+                                except Exception as e:
+                                    continue
+                            
+                            progress.progress(80)
+                            
+                            # Step 4: Apply transformations
+                            status.text('🔄 Applying transformations...')
+                            
+                            for trans in action_plan.get('transformations', []):
+                                try:
+                                    col = trans['column']
+                                    trans_type = trans['transformation']
+                                    
+                                    if col in df_clean.columns and pd.api.types.is_numeric_dtype(df_clean[col]):
+                                        if trans_type == 'log':
+                                            df_clean[f'{col}_log'] = np.log1p(df_clean[col])
+                                        elif trans_type == 'sqrt':
+                                            df_clean[f'{col}_sqrt'] = np.sqrt(df_clean[col].clip(lower=0))
+                                except Exception as e:
+                                    continue
+                            
+                            progress.progress(100)
+                            status.text('✅ Autonomous execution complete!')
+                            
+                            # Save results
+                            st.session_state['df'] = df_clean
+                            st.session_state['engineered_df'] = df_clean
+                            
+                            st.success('🎉 Agentic AI completed autonomous data preparation!')
+                            
+                            # Show what was done
+                            st.subheader('📊 Actions Taken')
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Missing Data Handled", len(action_plan.get('missing_data_actions', [])))
+                                st.metric("Features Engineered", len(action_plan.get('feature_engineering', [])))
+                            with col2:
+                                st.metric("Transformations Applied", len(action_plan.get('transformations', [])))
+                                st.metric("Final Shape", f"{df_clean.shape[0]} × {df_clean.shape[1]}")
+                            
+                            with st.expander('📋 Detailed Action Log'):
+                                st.json(action_plan)
+                            
+                            st.info('✅ Data is ready! Proceed to Preprocess tab for final preparation, then Modeling.')
+                            st.balloons()
+                            
+                        except Exception as e:
+                            st.error(f'❌ Agentic AI failed: {e}')
+                            st.code(str(e))
+        
         st.markdown('---')
         if st.button('🎨 Generate Comprehensive EDA Charts'):
             with st.spinner('Creating detailed visualizations...'):
@@ -92,7 +339,7 @@ elif nav == '📊 EDA & Profiling':
                 st.session_state['eda_charts'] = chart_paths
                 st.success(f'✅ Generated {len(chart_paths)} charts for report')
                 for path in chart_paths:
-                    st.image(path, use_column_width=True)
+                    st.image(path, width='stretch')
 
 elif nav == '🔧 Preprocess':
     st.header('3️⃣ Data Preprocessing & Cleaning')
@@ -119,7 +366,7 @@ elif nav == '🔧 Preprocess':
     missing_df = missing_summary(df)
     missing_df_filtered = missing_df[missing_df['Missing Count'] > 0]
     if len(missing_df_filtered) > 0:
-        st.dataframe(missing_df_filtered, use_container_width=True)
+        st.dataframe(missing_df_filtered, width='stretch')
     else:
         st.success('✅ No missing values detected!')
     st.markdown('---')
@@ -177,7 +424,7 @@ elif nav == '🔧 Preprocess':
                         st.text(log_entry)
                 st.subheader('📊 Imputation Summary')
                 imputation_df = pd.DataFrame([{'Column': k, 'Method': v} for k, v in result['imputation_decisions'].items()])
-                st.dataframe(imputation_df, use_container_width=True)
+                st.dataframe(imputation_df, width='stretch')
         except Exception as e:
             st.error(f'❌ Preprocessing failed: {e}')
             import traceback
@@ -294,43 +541,64 @@ Generate complete, runnable code now:"""
                 st.code(feature_code, language='python')
                 
                 st.markdown('---')
+                st.markdown('---')
                 st.subheader('⚡ Apply Features')
                 
-                if st.button('✅ Execute Feature Engineering'):
-                    with st.spinner('Creating features...'):
-                        try:
-                            # Store original columns
-                            original_cols = set(df.columns)
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button('✅ Execute Feature Engineering', type='primary', key='execute_features'):
+                        with st.spinner('Creating features...'):
+                            try:
+                                # Store original columns
+                                original_cols = set(df.columns)
+                                
+                                # Create a safe namespace with all necessary objects
+                                namespace = {
+                                    'df': df,
+                                    'np': np,
+                                    'pd': pd,
+                                    '__builtins__': __builtins__
+                                }
+                                
+                                # Execute the code
+                                exec(feature_code, namespace)
+                                
+                                # Get the modified dataframe back
+                                df = namespace['df']
+                                
+                                # Find new columns
+                                new_cols = set(df.columns) - original_cols
+                                
+                                if new_cols:
+                                    st.session_state['engineered_df'] = df
+                                    st.session_state['df'] = df
+                                    
+                                    st.success(f'✅ Created {len(new_cols)} new features!')
+                                    
+                                    st.subheader('🎉 New Features Created')
+                                    new_features_list = list(new_cols)
+                                    for idx, col in enumerate(new_features_list, 1):
+                                        st.write(f"{idx}. **{col}**")
+                                    
+                                    st.subheader('📊 Sample Data with New Features')
+                                    display_cols = list(original_cols)[:3] + new_features_list
+                                    st.dataframe(df[display_cols].head(10))
+                                    
+                                    st.info('💾 Features saved! Proceed to Preprocess tab to prepare for modeling.')
+                                else:
+                                    st.warning('No new features were created. Try regenerating the code.')
                             
-                            # Execute the code
-                            exec(feature_code, {'df': df, 'np': np, 'pd': pd})
-                            
-                            # Find new columns
-                            new_cols = set(df.columns) - original_cols
-                            
-                            if new_cols:
-                                st.session_state['engineered_df'] = df
-                                st.session_state['df'] = df
-                                
-                                st.success(f'✅ Created {len(new_cols)} new features!')
-                                
-                                st.subheader('🎉 New Features')
-                                for col in new_cols:
-                                    st.write(f"- **{col}**")
-                                
-                                st.subheader('📊 Sample Data')
-                                display_cols = list(original_cols)[:5] + list(new_cols)
-                                st.dataframe(df[display_cols].head(10))
-                                
-                                st.info('💾 Features saved! Proceed to Preprocess tab to prepare for modeling.')
-                            else:
-                                st.warning('No new features were created. Try regenerating.')
-                        
-                        except Exception as e:
-                            st.error(f'❌ Failed to execute code: {e}')
-                            st.write('**Debug Info:**')
-                            st.code(str(e))
-                            st.write('Try regenerating the code or check for syntax errors.')
+                            except Exception as e:
+                                st.error(f'❌ Failed to execute code: {e}')
+                                st.write('**Debug Info:**')
+                                st.code(str(e))
+                                st.write('**Problematic Code:**')
+                                st.code(feature_code)
+                                st.write('Try clicking "Generate AI Features" again to get new code.')
+                
+                with col2:
+                    if st.button('🔄 Regenerate Code', key='regen_code'):
+                        st.rerun()
             
             except Exception as e:
                 st.error(f'❌ AI feature generation failed: {e}')
@@ -447,16 +715,21 @@ elif nav == '🤖 Modeling':
         param_preset = {'C': C, 'kernel': kernel}
     st.markdown('---')
     st.subheader('🎓 Training Options')
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         tune = st.checkbox('Enable hyperparameter tuning', help="Use RandomizedSearchCV")
     with col2:
         n_iter = st.number_input('Tuning iterations', 5, 200, 20) if tune else 10
     with col3:
         cv = st.number_input('CV folds', 2, 10, 5)
-    with col4:
-        test_size = st.slider('Test size %', 10, 40, 20) / 100
     
+    # Check for class imbalance warning
+    if problem_type == 'classification':
+        class_counts = y.value_counts()
+        min_class_count = class_counts.min()
+        if min_class_count < cv:
+            st.warning(f'⚠️ Some classes have only {min_class_count} sample(s). CV folds adjusted to {min_class_count}.')
+            cv = max(2, min_class_count)
     if st.button('🚀 Train Model', type='primary'):
         try:
             with st.spinner('🔄 Training model... This may take several minutes'):
@@ -465,7 +738,7 @@ elif nav == '🤖 Modeling':
                 result = get_model(model_name, param_preset, problem_type)
                 model_obj = result['model']
                 progress_bar.progress(40)
-                res = tune_model(model_obj, X_selected, y, tune=tune, n_iter=n_iter, cv=cv, problem_type=problem_type, test_size=test_size)
+                res = tune_model(model_obj, X_selected, y, tune=tune, n_iter=n_iter, cv=cv, problem_type=problem_type)
                 progress_bar.progress(100)
                 st.session_state['model_result'] = res
                 st.session_state['feature_importance'] = res.get('feature_importance')
@@ -474,7 +747,7 @@ elif nav == '🤖 Modeling':
                 st.subheader('📊 Model Performance')
                 metrics_display = {k: v for k, v in res['metrics'].items() if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']}
                 metrics_df = pd.DataFrame([metrics_display])
-                st.dataframe(metrics_df, use_container_width=True)
+                st.dataframe(metrics_df, width='stretch')
                 if tune and 'best_params' in res:
                     with st.expander('🎯 Best Hyperparameters Found'):
                         st.json(res['best_params'])
@@ -486,7 +759,10 @@ elif nav == '🤖 Modeling':
                     ax.barh(importance_df['Feature'], importance_df['Importance'])
                     ax.set_xlabel('Importance')
                     ax.set_title('Top 20 Most Important Features')
-                    plt.tight_layout()
+                    try:
+                        plt.tight_layout()
+                    except:
+                        pass
                     st.pyplot(fig)
                     plt.close(fig)
                 if problem_type == 'classification':
@@ -540,6 +816,80 @@ elif nav == '🤖 Modeling':
                         plt.tight_layout()
                         st.pyplot(fig)
                         plt.close(fig)
+                
+                # AI Business Insights Section
+                st.markdown('---')
+                st.subheader('💡 AI Business Insights')
+                
+                if st.button('🤖 Generate Business Insights from Results', type='primary'):
+                    if not groq_token:
+                        st.error('❌ Please provide Groq API Key in sidebar')
+                    else:
+                        with st.spinner('🤖 Analyzing results and generating business insights...'):
+                            try:
+                                metrics_clean = {k: v for k, v in res['metrics'].items() if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']}
+                                
+                                feature_importance_text = ""
+                                if res.get('feature_importance') is not None:
+                                    top_features = res['feature_importance'].head(10)
+                                    feature_importance_text = "\n".join([f"- {row['Feature']}: {row['Importance']:.4f}" for _, row in top_features.iterrows()])
+                                
+                                prompt = f"""You are a business consultant analyzing machine learning results. Provide ACTIONABLE BUSINESS INSIGHTS.
+
+Problem Type: {problem_type.capitalize()}
+Model: {model_name}
+Target Variable: {st.session_state.get('target_column')}
+
+Model Performance:
+{json.dumps(metrics_clean, indent=2)}
+
+Top 10 Most Important Features:
+{feature_importance_text if feature_importance_text else "Not available"}
+
+Training Data: {res.get('X_train_shape', (0,))[0]:,} samples
+Test Data: {res.get('X_test_shape', (0,))[0]:,} samples
+
+Provide a comprehensive business analysis (5-6 paragraphs) covering:
+
+1. **Performance Assessment**: What does this performance mean in business terms? Is it good enough for production use?
+
+2. **Key Drivers**: Which factors most influence the outcome? What business actions can we take based on these drivers?
+
+3. **Business Recommendations**: 
+   - What immediate actions should the business take?
+   - Which areas need improvement or investigation?
+   - What opportunities does this model reveal?
+
+4. **Risk Assessment**: What are the limitations? Where might the model fail? What safeguards are needed?
+
+5. **ROI and Implementation**: 
+   - What's the expected business impact?
+   - How should this be deployed?
+   - What resources are needed?
+
+6. **Next Steps**: Concrete action items with priorities
+
+Focus on ACTIONABLE insights that executives and managers can implement. Avoid technical jargon."""
+                                
+                                business_insights = groq_generate_text(
+                                    prompt=prompt,
+                                    api_key=groq_token,
+                                    model="llama-3.3-70b-versatile",
+                                    max_tokens=2000
+                                )
+                                
+                                st.session_state['business_insights'] = business_insights
+                                st.success('✅ Business insights generated!')
+                                
+                                st.markdown('### 📊 Business Analysis')
+                                st.write(business_insights)
+                                
+                            except Exception as e:
+                                st.error(f'Failed to generate insights: {e}')
+                
+                if 'business_insights' in st.session_state and st.session_state['business_insights']:
+                    with st.expander('📋 View Saved Business Insights'):
+                        st.write(st.session_state['business_insights'])
         except Exception as e:
             st.error(f'❌ Training failed: {e}')
             import traceback
@@ -555,136 +905,87 @@ elif nav == '📄 Report':
     model_res = st.session_state.get('model_result')
     preprocessing_log = st.session_state.get('preprocessing_log', [])
     imputation_decisions = st.session_state.get('imputation_decisions', {})
-    
-    # Business Insights Section
-    st.subheader('💼 AI Business Insights & Recommendations')
-    st.write("Get business-focused analysis and actionable recommendations based on your results.")
-    
-    if not groq_token:
-        st.error('❌ Please provide Groq API Key in sidebar')
-    elif not model_res:
-        st.warning('⚠️ Please train a model first to generate business insights')
-    else:
-        if st.button('🎯 Generate Business Insights', type='primary'):
-            try:
-                with st.spinner('🤖 AI is analyzing results and generating business recommendations...'):
-                    from code_generator import generate_business_insights
-                    business_insights = generate_business_insights(df, model_res, groq_token)
-                    st.session_state['business_insights'] = business_insights
-                    st.success('✅ Business insights generated!')
-                    st.markdown('### 📊 Business Analysis & Recommendations')
-                    st.write(business_insights)
-            except Exception as e:
-                st.error(f'❌ Failed to generate insights: {e}')
-    
-    if 'business_insights' in st.session_state:
-        with st.expander('📊 View Business Insights'):
-            st.write(st.session_state['business_insights'])
-    
-    st.markdown('---')
-    
-    # Autonomous AI Agent Section
-    st.subheader('🤖 Autonomous AI Agent')
-    st.write("Let AI analyze your entire pipeline and suggest specific improvements.")
-    
-    if groq_token:
-        if st.button('🔮 Run Autonomous Analysis'):
-            try:
-                with st.spinner('🤖 AI Agent is analyzing your entire workflow...'):
-                    from code_generator import generate_autonomous_recommendations
-                    
-                    agent_context = {
-                        'rows': df.shape[0],
-                        'columns': df.shape[1],
-                        'target': st.session_state.get('target_column'),
-                        'problem_type': st.session_state.get('problem_type'),
-                        'model_name': model_res.get('model_name') if model_res else None,
-                        'metrics': model_res.get('metrics') if model_res else {},
-                        'selected_features': st.session_state.get('selected_features', []),
-                        'total_features': st.session_state.get('X_processed').shape[1] if st.session_state.get('X_processed') is not None else 0,
-                        'preprocessing_issues': preprocessing_log[:10] if preprocessing_log else []
-                    }
-                    
-                    recommendations = generate_autonomous_recommendations(agent_context, groq_token)
-                    st.session_state['ai_recommendations'] = recommendations
-                    st.success('✅ Autonomous analysis complete!')
-                    
-                    if isinstance(recommendations, dict) and 'priority_actions' in recommendations:
-                        st.markdown('### 🎯 Priority Actions')
-                        for idx, action in enumerate(recommendations['priority_actions'][:5], 1):
-                            with st.expander(f"#{idx}: {action.get('action', 'Action')} - {action.get('difficulty', 'Unknown')} difficulty"):
-                                st.write(f"**Expected Improvement:** {action.get('expected_improvement', 'N/A')}")
-                                st.write(f"**Can be Automated:** {'Yes' if action.get('automated') else 'No'}")
-                                
-                                if action.get('code'):
-                                    st.code(action['code'], language='python')
-                                    
-                                    if action.get('automated') and st.button(f'Execute Action #{idx}', key=f'execute_{idx}'):
-                                        with st.spinner(f'Executing action #{idx}...'):
-                                            try:
-                                                exec(action['code'], {'df': df, 'np': np, 'pd': pd, 'st': st})
-                                                st.success(f'✅ Action #{idx} executed!')
-                                            except Exception as e:
-                                                st.error(f'Failed to execute: {e}')
-                        
-                        if recommendations.get('business_impact'):
-                            st.markdown('### 💰 Business Impact')
-                            st.info(recommendations['business_impact'])
-                    else:
-                        st.write(recommendations.get('raw_recommendations', recommendations))
-            
-            except Exception as e:
-                st.error(f'❌ Autonomous analysis failed: {e}')
-    
-    if 'ai_recommendations' in st.session_state:
-        with st.expander('🔮 View AI Recommendations'):
-            st.json(st.session_state['ai_recommendations'])
-    
-    st.markdown('---')
-    
-    # Executive Summary
     st.subheader('📝 Executive Summary')
-    if st.button('🤖 Generate Executive Summary'):
+    if st.button('🤖 Generate AI Executive Summary'):
         if not groq_token:
             st.error('❌ Please provide Groq API Key in sidebar')
         else:
             try:
-                with st.spinner('🤖 Generating executive summary...'):
+                with st.spinner('🤖 AI is analyzing your project...'):
                     eda_summary = {'rows': int(df.shape[0]), 'columns': int(df.shape[1]), 'numeric_columns': int(len(df.select_dtypes(include='number').columns)), 'categorical_columns': int(len(df.select_dtypes(exclude='number').columns)), 'total_missing': int(df.isna().sum().sum()), 'missing_percentage': f"{(df.isna().sum().sum() / (df.shape[0] * df.shape[1]) * 100):.2f}%"}
-                    prompt = f"""You are a senior business consultant writing an executive summary for C-level executives.
+                    prompt = f"""You are a senior data scientist writing an executive summary with BUSINESS-FOCUSED RECOMMENDATIONS.
 
 Dataset Overview:
-- {eda_summary['rows']:,} records analyzed
-- {eda_summary['columns']} business variables
+- Total Records: {eda_summary['rows']:,}
+- Features: {eda_summary['columns']}
+- Numeric Features: {eda_summary['numeric_columns']}
+- Categorical Features: {eda_summary['categorical_columns']}
+- Missing Data: {eda_summary['total_missing']} ({eda_summary['missing_percentage']})
+
+Preprocessing Steps:
+{chr(10).join(preprocessing_log[:10])}
 
 Model Results:
-{json.dumps(model_res, default=str, indent=2) if model_res else "Analysis pending"}
+{json.dumps(model_res, default=str, indent=2) if model_res else "Model not yet trained"}
 
-Write an executive summary (3-4 paragraphs) in BUSINESS language covering:
-1. Business situation and what the data reveals
-2. Key findings that impact business decisions
-3. Recommended actions with expected ROI
-4. Implementation priorities
+Write a professional executive summary (4-5 paragraphs) that focuses on:
+1. Dataset quality and business implications
+2. Key insights from preprocessing (what the data tells us about the business)
+3. Model performance in business terms (not just metrics)
+4. ACTIONABLE business recommendations based on the model results
+5. Concrete next steps for implementation and ROI
 
-Use business terms only - no technical jargon."""
-                    exec_summary = groq_generate_text(prompt=prompt, api_key=groq_token, model="llama-3.3-70b-versatile", max_tokens=1200)
+Focus on business value, not technical details. What should stakeholders DO with these findings?"""
+                    exec_summary = groq_generate_text(prompt=prompt, api_key=groq_token, model="llama-3.3-70b-versatile", max_tokens=1500)
                     st.session_state['exec_summary'] = exec_summary
                     st.success('✅ Executive summary generated!')
                     st.text_area('Executive Summary', value=exec_summary, height=400)
             except Exception as e:
-                st.error(f'❌ Failed: {e}')
-    
-    if 'exec_summary' in st.session_state:
-        st.text_area('Current Summary', value=st.session_state['exec_summary'], height=300, key='existing_summary')
-    
+                st.error(f'❌ Failed to generate summary: {e}')
+    if 'exec_summary' in st.session_state and st.session_state['exec_summary']:
+        st.text_area('Current Executive Summary', value=st.session_state['exec_summary'], height=300, key='existing_summary')
     st.markdown('---')
-    st.subheader('💻 Generate Reproducible Code')
-    if st.button('🤖 Generate Python Code'):
+    st.subheader('🔧 Preprocessing Explanation')
+    if imputation_decisions and st.button('🤖 Generate Preprocessing Explanation'):
         if not groq_token:
-            st.error('❌ Please provide Groq API Key')
+            st.error('❌ Please provide Groq API Key in sidebar')
         else:
             try:
-                with st.spinner('🤖 Generating code...'):
+                with st.spinner('Generating preprocessing explanation...'):
+                    prep_explanation = generate_preprocessing_explanation(imputation_decisions, groq_token)
+                    st.session_state['prep_explanation'] = prep_explanation
+                    st.success('✅ Explanation generated!')
+                    st.write(prep_explanation)
+            except Exception as e:
+                st.error(f'❌ Failed: {e}')
+    if 'prep_explanation' in st.session_state:
+        with st.expander('View Preprocessing Explanation'):
+            st.write(st.session_state['prep_explanation'])
+    st.markdown('---')
+    st.subheader('📊 Model Results Interpretation')
+    if model_res and st.button('🤖 Generate Model Interpretation'):
+        if not groq_token:
+            st.error('❌ Please provide Groq API Key in sidebar')
+        else:
+            try:
+                with st.spinner('Interpreting model results...'):
+                    model_interpretation = generate_model_interpretation(model_res, groq_token)
+                    st.session_state['model_interpretation'] = model_interpretation
+                    st.success('✅ Interpretation generated!')
+                    st.write(model_interpretation)
+            except Exception as e:
+                st.error(f'❌ Failed: {e}')
+    if 'model_interpretation' in st.session_state:
+        with st.expander('View Model Interpretation'):
+            st.write(st.session_state['model_interpretation'])
+    st.markdown('---')
+    st.subheader('💻 Generate Reproducible Code')
+    if st.button('🤖 Generate Python Notebook Code'):
+        if not groq_token:
+            st.error('❌ Please provide Groq API Key in sidebar')
+        else:
+            try:
+                with st.spinner('🤖 Generating complete Python code...'):
                     code_context = {'preprocessing_log': preprocessing_log, 'imputation_decisions': imputation_decisions, 'model_result': model_res, 'selected_features': st.session_state.get('selected_features', []), 'target': st.session_state.get('target_column'), 'problem_type': st.session_state.get('problem_type')}
                     notebook_code = generate_code_notebook(code_context, groq_token)
                     st.session_state['generated_code'] = notebook_code
@@ -692,26 +993,28 @@ Use business terms only - no technical jargon."""
                     st.code(notebook_code, language='python')
                     st.download_button(label='📥 Download Python Code', data=notebook_code, file_name=f'ml_project_{uuid.uuid4().hex[:6]}.py', mime='text/x-python')
             except Exception as e:
-                st.error(f'❌ Failed: {e}')
-    
+                st.error(f'❌ Code generation failed: {e}')
     st.markdown('---')
     st.subheader('📄 Generate Final Report')
     if st.button('📄 Create Word Report (.docx)', type='primary'):
         try:
             with st.spinner('📝 Creating comprehensive report...'):
-                exec_summary = st.session_state.get('exec_summary', 'Not generated')
-                business_insights = st.session_state.get('business_insights', '')
+                exec_summary = st.session_state.get('exec_summary', 'Executive summary not generated. Please generate it above.')
+                prep_explanation = st.session_state.get('prep_explanation', '')
+                model_interpretation = st.session_state.get('model_interpretation', '')
                 generated_code = st.session_state.get('generated_code', '# Code not generated')
                 enhanced_summary = exec_summary
-                if business_insights:
-                    enhanced_summary += f"\n\n## Business Insights & Recommendations\n{business_insights}"
+                if prep_explanation:
+                    enhanced_summary += f"\n\n## Preprocessing Details\n{prep_explanation}"
+                if model_interpretation:
+                    enhanced_summary += f"\n\n## Model Analysis\n{model_interpretation}"
                 report_path = create_comprehensive_report(df=df, executive_summary=enhanced_summary, preprocessing_log=preprocessing_log, imputation_decisions=imputation_decisions, model_result=model_res, eda_charts=st.session_state.get('eda_charts', []), generated_code=generated_code)
                 with open(report_path, 'rb') as f:
                     report_data = f.read()
-                st.success('✅ Report generated!')
-                st.download_button(label='📥 Download Report', data=report_data, file_name=f'ml_report_{uuid.uuid4().hex[:6]}.docx', mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+                st.success('✅ Report generated successfully!')
+                st.download_button(label='📥 Download Complete Report', data=report_data, file_name=f'ml_comprehensive_report_{uuid.uuid4().hex[:6]}.docx', mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         except Exception as e:
-            st.error(f'❌ Failed: {e}')
+            st.error(f'❌ Report generation failed: {e}')
             import traceback
             with st.expander('🐛 Error Details'):
                 st.code(traceback.format_exc())

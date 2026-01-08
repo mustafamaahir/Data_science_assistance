@@ -17,7 +17,7 @@ def generate_business_insights(df, model_result: dict, api_key: str):
     # Extract key information
     metrics = model_result.get('metrics', {})
     feature_importance = model_result.get('feature_importance')
-    problem_type = 'classification' if 'accuracy' in metrics else 'regression'
+    problem_type: str = 'classification' if 'accuracy' in metrics else 'regression'
     
     # Get top features
     top_features = []
