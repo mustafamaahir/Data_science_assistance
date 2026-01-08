@@ -2,24 +2,103 @@ import json
 from llm import groq_generate_text
 
 
-def generate_feature_insights(feature_info: dict, api_key: str, df=None):
+def generate_business_insights(df, model_result: dict, api_key: str):
     """
-    Generate AI insights about feature selection.
+    Generate business-focused insights from model results.
     
     Args:
-        feature_info: Dict with feature_names, target, problem_type
+        df: Original DataFrame
+        model_result: Model training results with metrics and feature importance
         api_key: Groq API key
-        df: Optional DataFrame for context
     
     Returns:
-        String with insights and recommendations
+        String with business insights and actionable recommendations
     """
-    # Get basic stats if df provided
+    # Extract key information
+    metrics = model_result.get('metrics', {})
+    feature_importance = model_result.get('feature_importance')
+    problem_type = 'classification' if 'accuracy' in metrics else 'regression'
+    
+    # Get top features
+    top_features = []
+    if feature_importance is not None:
+        top_features = feature_importance.head(10)['Feature'].tolist()
+    
+    # Clean metrics
+    clean_metrics = {k: v for k, v in metrics.items() 
+                    if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']}
+    
+    # Get data context
+    data_context = {
+        'rows': int(df.shape[0]),
+        'columns': int(df.shape[1]),
+        'numeric_features': len(df.select_dtypes(include='number').columns),
+        'categorical_features': len(df.select_dtypes(exclude='number').columns)
+    }
+    
+    prompt = f"""You are a BUSINESS ANALYST and STRATEGY CONSULTANT translating machine learning results into actionable business recommendations.
+
+CRITICAL INSTRUCTION: Do NOT discuss technical ML details (metrics, algorithms, preprocessing). Focus ONLY on business impact and actions.
+
+Data Context:
+- {data_context['rows']:,} records analyzed
+- {data_context['columns']} business variables examined
+
+Model Performance:
+{json.dumps(clean_metrics, indent=2)}
+
+Top Business Drivers (Most Important Factors):
+{', '.join(top_features[:5])}
+
+Your task: Write a business-focused insight report (4-5 paragraphs) covering:
+
+1. **BUSINESS SITUATION**: What does this data tell us about the business reality? What patterns emerged?
+
+2. **KEY DRIVERS**: Which factors matter most for business outcomes? What does this mean for operations?
+
+3. **BUSINESS IMPACT**: Translate model performance into business terms:
+   - If accuracy is 85%, what does this mean for decision-making confidence?
+   - If R² is 0.75, how much of business outcome variation can we explain?
+   - What's the business risk of errors?
+
+4. **ACTIONABLE RECOMMENDATIONS**: Provide 5-7 specific, concrete actions:
+   - What should management DO differently?
+   - Where should resources be allocated?
+   - What processes need improvement?
+   - What decisions can now be automated?
+   - What ROI can be expected?
+
+5. **IMPLEMENTATION ROADMAP**: 
+   - Quick wins (30 days)
+   - Medium-term initiatives (3-6 months)
+   - Long-term strategy (12+ months)
+
+Use business language - avoid terms like "model," "features," "algorithm," "preprocessing." Instead use:
+- "Business factors" instead of "features"
+- "Prediction confidence" instead of "accuracy"
+- "Key drivers" instead of "important features"
+- "Business outcomes" instead of "target variable"
+
+Be specific with numbers, percentages, and dollar impacts where possible."""
+    
+    insights = groq_generate_text(
+        prompt=prompt,
+        api_key=api_key,
+        model="llama-3.3-70b-versatile",
+        max_tokens=2000,
+        temperature=0.7
+    )
+    
+    return insights
+
+
+def generate_feature_insights(feature_info: dict, api_key: str, df=None):
+    """Generate AI insights about feature selection."""
     feature_stats = ""
     if df is not None:
         feature_names = feature_info.get('feature_names', [])
         stats = []
-        for feat in feature_names[:20]:  # Limit for token size
+        for feat in feature_names[:20]:
             if feat in df.columns:
                 if df[feat].dtype in ['int64', 'float64']:
                     stats.append(f"- {feat}: numeric, mean={df[feat].mean():.2f}, std={df[feat].std():.2f}")
@@ -57,16 +136,7 @@ Keep your response concise and actionable (3-4 paragraphs maximum)."""
 
 
 def generate_code_notebook(context: dict, api_key: str):
-    """
-    Generate complete Python code for reproducing the ML pipeline.
-    
-    Args:
-        context: Dict with preprocessing_log, model_result, etc.
-        api_key: Groq API key
-    
-    Returns:
-        String containing complete Python code
-    """
+    """Generate complete Python code for reproducing the ML pipeline."""
     preprocessing_summary = "\n".join(context.get('preprocessing_log', [])[:15])
     
     model_info = context.get('model_result', {})
@@ -123,7 +193,6 @@ Generate ONLY the Python code, no explanations before or after."""
         max_tokens=3000
     )
     
-    # Clean up the code (remove markdown if present)
     if "```python" in code:
         code = code.split("```python")[1].split("```")[0].strip()
     elif "```" in code:
@@ -133,16 +202,7 @@ Generate ONLY the Python code, no explanations before or after."""
 
 
 def generate_preprocessing_explanation(imputation_decisions: dict, api_key: str):
-    """
-    Generate natural language explanation of preprocessing decisions.
-    
-    Args:
-        imputation_decisions: Dict of column -> method
-        api_key: Groq API key
-    
-    Returns:
-        String with detailed explanation
-    """
+    """Generate natural language explanation of preprocessing decisions."""
     prompt = f"""You are explaining data preprocessing decisions to a technical audience.
 
 Imputation Methods Used:
@@ -166,21 +226,11 @@ Be specific about KNN vs regression imputation differences."""
 
 
 def generate_model_interpretation(model_result: dict, api_key: str):
-    """
-    Generate interpretation of model results.
-    
-    Args:
-        model_result: Model training results
-        api_key: Groq API key
-    
-    Returns:
-        String with model interpretation
-    """
+    """Generate interpretation of model results."""
     metrics = model_result.get('metrics', {})
     model_name = model_result.get('model_name', 'Model')
     feature_importance = model_result.get('feature_importance')
     
-    # Extract clean metrics (no complex objects)
     clean_metrics = {
         k: v for k, v in metrics.items() 
         if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']
@@ -216,3 +266,94 @@ Use clear language suitable for both technical and business audiences."""
     )
     
     return interpretation
+
+
+def generate_autonomous_recommendations(context: dict, api_key: str):
+    """
+    Generate autonomous AI agent recommendations for improving analysis.
+    
+    Args:
+        context: Dict with current analysis state
+        api_key: Groq API key
+    
+    Returns:
+        Dict with recommendations and executable actions
+    """
+    prompt = f"""You are an AUTONOMOUS AI DATA SCIENCE AGENT analyzing this ML project and providing actionable improvement recommendations.
+
+Current State:
+- Dataset: {context.get('rows', 0):,} rows, {context.get('columns', 0)} columns
+- Target: {context.get('target', 'Unknown')}
+- Problem Type: {context.get('problem_type', 'Unknown')}
+- Model: {context.get('model_name', 'Not trained')}
+- Current Performance: {json.dumps(context.get('metrics', {}), default=str)}
+- Features Used: {len(context.get('selected_features', []))} out of {context.get('total_features', 0)}
+
+Preprocessing Issues:
+{json.dumps(context.get('preprocessing_issues', []), indent=2)}
+
+Your task: Analyze the entire pipeline and provide specific, prioritized recommendations:
+
+1. **DATA QUALITY IMPROVEMENTS**
+   - What data issues need addressing?
+   - Should we collect more data? Why?
+   - Which missing value handling needs revision?
+
+2. **FEATURE ENGINEERING**
+   - What new features should be created? Be specific.
+   - Which existing features should be removed?
+   - What transformations are needed?
+
+3. **MODEL OPTIMIZATION**
+   - Should we try different algorithms? Which ones and why?
+   - What hyperparameters need tuning?
+   - Is the current train/test split appropriate?
+
+4. **PERFORMANCE BOOST ACTIONS**
+   - Rank top 5 actions by expected performance impact
+   - Estimate improvement for each action
+   - Provide implementation difficulty (Easy/Medium/Hard)
+
+5. **AUTOMATED ACTIONS I CAN TAKE**
+   - List specific actions that can be automated
+   - Provide exact Python code snippets for each
+   - Indicate which need human approval
+
+Format as JSON with this structure:
+{{
+  "priority_actions": [
+    {{
+      "action": "description",
+      "expected_improvement": "X%",
+      "difficulty": "Easy/Medium/Hard",
+      "automated": true/false,
+      "code": "python code if automated"
+    }}
+  ],
+  "data_recommendations": ["list"],
+  "feature_recommendations": ["list"],
+  "model_recommendations": ["list"],
+  "business_impact": "overall impact summary"
+}}
+
+Be specific, quantitative, and actionable."""
+    
+    recommendations = groq_generate_text(
+        prompt=prompt,
+        api_key=api_key,
+        model="llama-3.3-70b-versatile",
+        max_tokens=2000,
+        temperature=0.7
+    )
+    
+    # Try to parse JSON
+    try:
+        if '```json' in recommendations:
+            recommendations = recommendations.split('```json')[1].split('```')[0].strip()
+        elif '```' in recommendations:
+            recommendations = recommendations.split('```')[1].split('```')[0].strip()
+        
+        return json.loads(recommendations)
+    except:
+        # Return as text if JSON parsing fails
+        return {'raw_recommendations': recommendations}
