@@ -88,10 +88,29 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
     # Split data
     test_size = min(0.2, max(0.1, 100 / len(X)))
     
-    if problem_type == 'classification' and y.nunique() > 1:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
+    # Check if stratification is possible
+    if problem_type == 'classification':
+        # Count samples per class
+        class_counts = y.value_counts()
+        min_class_count = class_counts.min()
+        
+        # Only stratify if all classes have at least 2 samples
+        if min_class_count >= 2 and y.nunique() > 1:
+            try:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42, stratify=y
+                )
+            except ValueError:
+                # Fallback to non-stratified split
+                st.warning(f"⚠️ Some classes have too few samples for stratified split. Using random split instead.")
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42
+                )
+        else:
+            st.warning(f"⚠️ Classes with single samples detected. Using random split instead of stratified split.")
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=42
+            )
     else:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42

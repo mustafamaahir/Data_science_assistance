@@ -324,6 +324,23 @@ def comprehensive_preprocessing(
             imputation_decisions[col] = 'mode/constant (Missing)'
             preprocessing_log.append(f"  → Action: Mode/constant imputation (categorical)")
     
+    # CRITICAL: Final check - ensure NO missing values remain in features
+    remaining_missing = X.isna().sum()
+    if remaining_missing.sum() > 0:
+        preprocessing_log.append("\n⚠️ Final cleanup: Handling remaining missing values")
+        for col in X.columns:
+            if X[col].isna().sum() > 0:
+                is_numeric = pd.api.types.is_numeric_dtype(X[col])
+                if is_numeric:
+                    X[col] = X[col].fillna(X[col].median())
+                    preprocessing_log.append(f"  → Final cleanup '{col}': Filled with median")
+                else:
+                    X[col] = X[col].fillna('Missing')
+                    preprocessing_log.append(f"  → Final cleanup '{col}': Filled with 'Missing'")
+    
+    # Align y with X after any row drops
+    y = y.loc[X.index]
+    
     # 4. Build sklearn pipeline for encoding/scaling
     num_cols = X.select_dtypes(include='number').columns.tolist()
     cat_cols = X.select_dtypes(exclude='number').columns.tolist()
