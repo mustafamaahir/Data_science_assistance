@@ -85,7 +85,7 @@ elif nav == '📊 EDA & Profiling':
         st.markdown('---')
         st.subheader('🔍 Missing Data Analysis')
         missing_df = missing_summary(df)
-        st.dataframe(missing_df, width='stretch')
+        st.dataframe(missing_df, use_container_width=True)
         
         st.markdown('---')
         st.subheader('💡 AI Data Insights')
@@ -339,7 +339,7 @@ Return ONLY valid JSON in this format:
                 st.session_state['eda_charts'] = chart_paths
                 st.success(f'✅ Generated {len(chart_paths)} charts for report')
                 for path in chart_paths:
-                    st.image(path, width='stretch')
+                    st.image(path, use_column_width=True)
 
 elif nav == '🔧 Preprocess':
     st.header('3️⃣ Data Preprocessing & Cleaning')
@@ -366,7 +366,7 @@ elif nav == '🔧 Preprocess':
     missing_df = missing_summary(df)
     missing_df_filtered = missing_df[missing_df['Missing Count'] > 0]
     if len(missing_df_filtered) > 0:
-        st.dataframe(missing_df_filtered, width='stretch')
+        st.dataframe(missing_df_filtered, use_container_width=True)
     else:
         st.success('✅ No missing values detected!')
     st.markdown('---')
@@ -424,7 +424,7 @@ elif nav == '🔧 Preprocess':
                         st.text(log_entry)
                 st.subheader('📊 Imputation Summary')
                 imputation_df = pd.DataFrame([{'Column': k, 'Method': v} for k, v in result['imputation_decisions'].items()])
-                st.dataframe(imputation_df, width='stretch')
+                st.dataframe(imputation_df, use_container_width=True)
         except Exception as e:
             st.error(f'❌ Preprocessing failed: {e}')
             import traceback
@@ -722,14 +722,6 @@ elif nav == '🤖 Modeling':
         n_iter = st.number_input('Tuning iterations', 5, 200, 20) if tune else 10
     with col3:
         cv = st.number_input('CV folds', 2, 10, 5)
-    
-    # Check for class imbalance warning
-    if problem_type == 'classification':
-        class_counts = y.value_counts()
-        min_class_count = class_counts.min()
-        if min_class_count < cv:
-            st.warning(f'⚠️ Some classes have only {min_class_count} sample(s). CV folds adjusted to {min_class_count}.')
-            cv = max(2, min_class_count)
     if st.button('🚀 Train Model', type='primary'):
         try:
             with st.spinner('🔄 Training model... This may take several minutes'):
@@ -747,7 +739,7 @@ elif nav == '🤖 Modeling':
                 st.subheader('📊 Model Performance')
                 metrics_display = {k: v for k, v in res['metrics'].items() if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']}
                 metrics_df = pd.DataFrame([metrics_display])
-                st.dataframe(metrics_df, width='stretch')
+                st.dataframe(metrics_df, use_container_width=True)
                 if tune and 'best_params' in res:
                     with st.expander('🎯 Best Hyperparameters Found'):
                         st.json(res['best_params'])
@@ -759,10 +751,7 @@ elif nav == '🤖 Modeling':
                     ax.barh(importance_df['Feature'], importance_df['Importance'])
                     ax.set_xlabel('Importance')
                     ax.set_title('Top 20 Most Important Features')
-                    try:
-                        plt.tight_layout()
-                    except:
-                        pass
+                    plt.tight_layout()
                     st.pyplot(fig)
                     plt.close(fig)
                 if problem_type == 'classification':
