@@ -88,6 +88,8 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
     # Split data
     test_size = min(0.2, max(0.1, 100 / len(X)))
     
+    warnings_list = []
+    
     # Check if stratification is possible
     if problem_type == 'classification':
         # Count samples per class
@@ -100,14 +102,14 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
                 X_train, X_test, y_train, y_test = train_test_split(
                     X, y, test_size=test_size, random_state=42, stratify=y
                 )
-            except ValueError:
+            except ValueError as e:
                 # Fallback to non-stratified split
-                st.warning(f"⚠️ Some classes have too few samples for stratified split. Using random split instead.")
+                warnings_list.append("Some classes have too few samples for stratified split. Using random split.")
                 X_train, X_test, y_train, y_test = train_test_split(
                     X, y, test_size=test_size, random_state=42
                 )
         else:
-            st.warning(f"⚠️ Classes with single samples detected. Using random split instead of stratified split.")
+            warnings_list.append(f"Classes with single samples detected: {class_counts[class_counts < 2].index.tolist()}. Using random split.")
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=42
             )
@@ -237,7 +239,8 @@ def tune_model(model, X, y, tune=False, n_iter=10, cv=5, problem_type='classific
         "model_name": model.__class__.__name__,
         "feature_importance": feature_importance,
         "X_train_shape": X_train.shape,
-        "X_test_shape": X_test.shape
+        "X_test_shape": X_test.shape,
+        "warnings": warnings_list
     }
     
     if best_params:

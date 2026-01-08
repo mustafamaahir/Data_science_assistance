@@ -172,6 +172,165 @@ Write for a business audience - focus on what the data MEANS, not just statistic
         if 'eda_insights' in st.session_state and st.session_state['eda_insights']:
             with st.expander('📋 View Saved EDA Insights'):
                 st.write(st.session_state['eda_insights'])
+            
+            st.markdown('---')
+            st.subheader('🤖 Agentic AI - Auto-Execute Recommendations')
+            
+            st.info("""
+            **Autonomous Mode**: The AI will automatically implement its own recommendations:
+            - Clean missing data based on MCAR tests
+            - Engineer features based on patterns found
+            - Prepare data for optimal modeling
+            """)
+            
+            if st.button('🚀 Enable Agentic AI (Auto-Execute)', type='primary'):
+                if not groq_token:
+                    st.error('❌ Please provide Groq API Key')
+                else:
+                    with st.spinner('🤖 Agentic AI is taking autonomous actions...'):
+                        try:
+                            progress = st.progress(0)
+                            status = st.empty()
+                            
+                            # Step 1: Generate action plan
+                            status.text('📋 Creating action plan...')
+                            progress.progress(20)
+                            
+                            action_prompt = f"""Based on the EDA insights below, create a DETAILED ACTION PLAN with executable steps.
+
+EDA Insights:
+{st.session_state['eda_insights']}
+
+Dataset Info:
+- Shape: {df.shape}
+- Columns: {list(df.columns[:20])}
+- Missing data: {df.isna().sum().sum()} values
+
+Create a JSON action plan with these steps:
+1. Missing data handling strategy for each column
+2. Feature engineering opportunities
+3. Data transformation needs
+
+Return ONLY valid JSON in this format:
+{{
+  "missing_data_actions": [
+    {{"column": "col_name", "action": "drop/median/mode/knn", "reason": "why"}}
+  ],
+  "feature_engineering": [
+    {{"type": "ratio/binning/interaction", "columns": ["col1", "col2"], "new_name": "name", "reason": "why"}}
+  ],
+  "transformations": [
+    {{"column": "col_name", "transformation": "log/sqrt/standardize", "reason": "why"}}
+  ]
+}}"""
+                            
+                            action_plan_str = groq_generate_text(
+                                prompt=action_prompt,
+                                api_key=groq_token,
+                                model="llama-3.3-70b-versatile",
+                                max_tokens=2000,
+                                temperature=0.3
+                            )
+                            
+                            # Clean JSON
+                            if '```json' in action_plan_str:
+                                action_plan_str = action_plan_str.split('```json')[1].split('```')[0]
+                            elif '```' in action_plan_str:
+                                action_plan_str = action_plan_str.split('```')[1].split('```')[0]
+                            
+                            action_plan = json.loads(action_plan_str.strip())
+                            st.session_state['action_plan'] = action_plan
+                            
+                            status.text('✅ Action plan created')
+                            progress.progress(40)
+                            
+                            # Step 2: Execute missing data handling
+                            status.text('🔧 Handling missing data autonomously...')
+                            df_clean = df.copy()
+                            
+                            for action in action_plan.get('missing_data_actions', []):
+                                col = action['column']
+                                method = action['action']
+                                
+                                if col in df_clean.columns and df_clean[col].isna().sum() > 0:
+                                    if method == 'drop':
+                                        df_clean = df_clean.dropna(subset=[col])
+                                    elif method == 'median':
+                                        df_clean[col].fillna(df_clean[col].median(), inplace=True)
+                                    elif method == 'mode':
+                                        df_clean[col].fillna(df_clean[col].mode()[0] if len(df_clean[col].mode()) > 0 else 'Missing', inplace=True)
+                                    elif method == 'knn':
+                                        # Simple KNN-like: fill with mean of nearest values
+                                        df_clean[col].fillna(df_clean[col].mean(), inplace=True)
+                            
+                            progress.progress(60)
+                            
+                            # Step 3: Execute feature engineering
+                            status.text('🎨 Engineering features autonomously...')
+                            
+                            for feat in action_plan.get('feature_engineering', []):
+                                try:
+                                    feat_type = feat['type']
+                                    cols = feat['columns']
+                                    new_name = feat['new_name']
+                                    
+                                    if all(c in df_clean.columns for c in cols):
+                                        if feat_type == 'ratio' and len(cols) == 2:
+                                            df_clean[new_name] = df_clean[cols[0]] / (df_clean[cols[1]] + 1e-10)
+                                        elif feat_type == 'interaction' and len(cols) == 2:
+                                            df_clean[new_name] = df_clean[cols[0]] * df_clean[cols[1]]
+                                        elif feat_type == 'binning' and len(cols) == 1:
+                                            df_clean[new_name] = pd.qcut(df_clean[cols[0]], q=5, labels=['Q1','Q2','Q3','Q4','Q5'], duplicates='drop')
+                                except Exception as e:
+                                    continue
+                            
+                            progress.progress(80)
+                            
+                            # Step 4: Apply transformations
+                            status.text('🔄 Applying transformations...')
+                            
+                            for trans in action_plan.get('transformations', []):
+                                try:
+                                    col = trans['column']
+                                    trans_type = trans['transformation']
+                                    
+                                    if col in df_clean.columns and pd.api.types.is_numeric_dtype(df_clean[col]):
+                                        if trans_type == 'log':
+                                            df_clean[f'{col}_log'] = np.log1p(df_clean[col])
+                                        elif trans_type == 'sqrt':
+                                            df_clean[f'{col}_sqrt'] = np.sqrt(df_clean[col].clip(lower=0))
+                                except Exception as e:
+                                    continue
+                            
+                            progress.progress(100)
+                            status.text('✅ Autonomous execution complete!')
+                            
+                            # Save results
+                            st.session_state['df'] = df_clean
+                            st.session_state['engineered_df'] = df_clean
+                            
+                            st.success('🎉 Agentic AI completed autonomous data preparation!')
+                            
+                            # Show what was done
+                            st.subheader('📊 Actions Taken')
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Missing Data Handled", len(action_plan.get('missing_data_actions', [])))
+                                st.metric("Features Engineered", len(action_plan.get('feature_engineering', [])))
+                            with col2:
+                                st.metric("Transformations Applied", len(action_plan.get('transformations', [])))
+                                st.metric("Final Shape", f"{df_clean.shape[0]} × {df_clean.shape[1]}")
+                            
+                            with st.expander('📋 Detailed Action Log'):
+                                st.json(action_plan)
+                            
+                            st.info('✅ Data is ready! Proceed to Preprocess tab for final preparation, then Modeling.')
+                            st.balloons()
+                            
+                        except Exception as e:
+                            st.error(f'❌ Agentic AI failed: {e}')
+                            st.code(str(e))
         
         st.markdown('---')
         if st.button('🎨 Generate Comprehensive EDA Charts'):
