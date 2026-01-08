@@ -38,9 +38,21 @@ def quick_eda(df: pd.DataFrame):
         
         for i, col in enumerate(numeric_df.columns[:n_cols], 1):
             ax = fig1.add_subplot(n_rows, 3, i)
-            numeric_df[col].hist(ax=ax, bins=30, edgecolor='black', alpha=0.7)
-            ax.set_title(f'{col}\n(mean={numeric_df[col].mean():.2f})', fontsize=10)
-            ax.set_xlabel('')
+            
+            # Clean data: remove NaN and infinite values
+            clean_data = numeric_df[col].replace([np.inf, -np.inf], np.nan).dropna()
+            
+            if len(clean_data) > 0:
+                try:
+                    ax.hist(clean_data, bins=30, edgecolor='black', alpha=0.7)
+                    ax.set_title(f'{col}\n(mean={clean_data.mean():.2f})', fontsize=10)
+                    ax.set_xlabel('')
+                except Exception as e:
+                    ax.text(0.5, 0.5, f'Could not plot\n{col}', 
+                           ha='center', va='center', transform=ax.transAxes)
+            else:
+                ax.text(0.5, 0.5, f'No valid data\n{col}', 
+                       ha='center', va='center', transform=ax.transAxes)
         
         plt.tight_layout()
         figs.append(fig1)
@@ -50,23 +62,36 @@ def quick_eda(df: pd.DataFrame):
         fig2 = plt.figure(figsize=(12, 10))
         ax2 = fig2.add_subplot(111)
         
-        corr = numeric_df.corr()
-        mask = np.triu(np.ones_like(corr, dtype=bool))
-        sns.heatmap(
-            corr, 
-            mask=mask,
-            annot=True if corr.shape[0] <= 10 else False,
-            fmt='.2f', 
-            cmap='coolwarm', 
-            center=0,
-            square=True,
-            linewidths=0.5,
-            cbar_kws={"shrink": 0.8},
-            ax=ax2
-        )
-        ax2.set_title('Correlation Matrix (Lower Triangle)', fontsize=14, fontweight='bold')
-        plt.tight_layout()
-        figs.append(fig2)
+        # Clean numeric data for correlation
+        numeric_clean = numeric_df.replace([np.inf, -np.inf], np.nan)
+        
+        # Only keep columns with valid data
+        valid_cols = numeric_clean.columns[numeric_clean.notna().sum() > 0]
+        if len(valid_cols) > 1:
+            numeric_clean = numeric_clean[valid_cols].dropna(axis=1, how='all')
+            
+            if numeric_clean.shape[1] > 1:
+                corr = numeric_clean.corr()
+                mask = np.triu(np.ones_like(corr, dtype=bool))
+                sns.heatmap(
+                    corr, 
+                    mask=mask,
+                    annot=True if corr.shape[0] <= 10 else False,
+                    fmt='.2f', 
+                    cmap='coolwarm', 
+                    center=0,
+                    square=True,
+                    linewidths=0.5,
+                    cbar_kws={"shrink": 0.8},
+                    ax=ax2
+                )
+                ax2.set_title('Correlation Matrix (Lower Triangle)', fontsize=14, fontweight='bold')
+                plt.tight_layout()
+                figs.append(fig2)
+            else:
+                plt.close(fig2)
+        else:
+            plt.close(fig2)
 
     # Missing data visualization
     missing_series = df.isna().sum().sort_values(ascending=False).head(20)
@@ -167,9 +192,21 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
         
         for idx, col in enumerate(numeric_cols, 1):
             ax = fig2.add_subplot(n_rows, 3, idx)
-            sns.boxplot(y=df[col], ax=ax, color='skyblue')
-            ax.set_title(f'{col}', fontsize=10)
-            ax.set_ylabel('')
+            
+            # Clean data
+            clean_data = df[col].replace([np.inf, -np.inf], np.nan).dropna()
+            
+            if len(clean_data) > 0:
+                try:
+                    sns.boxplot(y=clean_data, ax=ax, color='skyblue')
+                    ax.set_title(f'{col}', fontsize=10)
+                    ax.set_ylabel('')
+                except Exception as e:
+                    ax.text(0.5, 0.5, f'Could not plot', 
+                           ha='center', va='center', transform=ax.transAxes)
+            else:
+                ax.text(0.5, 0.5, f'No valid data', 
+                       ha='center', va='center', transform=ax.transAxes)
         
         plt.tight_layout()
         path2 = os.path.join(output_dir, f'numeric_distributions_{timestamp}.png')
@@ -205,30 +242,38 @@ def create_eda_charts(df: pd.DataFrame, output_dir='eda_charts'):
     # 4. Correlation heatmap
     numeric_df = df.select_dtypes(include='number')
     if numeric_df.shape[1] > 1:
-        fig4 = plt.figure(figsize=(14, 12))
-        ax4 = fig4.add_subplot(111)
+        # Clean numeric data
+        numeric_clean = numeric_df.replace([np.inf, -np.inf], np.nan)
+        valid_cols = numeric_clean.columns[numeric_clean.notna().sum() > 0]
         
-        corr = numeric_df.corr()
-        mask = np.triu(np.ones_like(corr, dtype=bool))
-        
-        sns.heatmap(
-            corr,
-            mask=mask,
-            annot=True if corr.shape[0] <= 15 else False,
-            fmt='.2f',
-            cmap='coolwarm',
-            center=0,
-            square=True,
-            linewidths=0.5,
-            cbar_kws={"shrink": 0.8},
-            ax=ax4
-        )
-        ax4.set_title('Feature Correlation Matrix', fontsize=16, fontweight='bold', pad=20)
-        plt.tight_layout()
-        path4 = os.path.join(output_dir, f'correlation_matrix_{timestamp}.png')
-        plt.savefig(path4, dpi=300, bbox_inches='tight')
-        plt.close(fig4)
-        chart_paths.append(path4)
+        if len(valid_cols) > 1:
+            numeric_clean = numeric_clean[valid_cols].dropna(axis=1, how='all')
+            
+            if numeric_clean.shape[1] > 1:
+                fig4 = plt.figure(figsize=(14, 12))
+                ax4 = fig4.add_subplot(111)
+                
+                corr = numeric_clean.corr()
+                mask = np.triu(np.ones_like(corr, dtype=bool))
+                
+                sns.heatmap(
+                    corr,
+                    mask=mask,
+                    annot=True if corr.shape[0] <= 15 else False,
+                    fmt='.2f',
+                    cmap='coolwarm',
+                    center=0,
+                    square=True,
+                    linewidths=0.5,
+                    cbar_kws={"shrink": 0.8},
+                    ax=ax4
+                )
+                ax4.set_title('Feature Correlation Matrix', fontsize=16, fontweight='bold', pad=20)
+                plt.tight_layout()
+                path4 = os.path.join(output_dir, f'correlation_matrix_{timestamp}.png')
+                plt.savefig(path4, dpi=300, bbox_inches='tight')
+                plt.close(fig4)
+                chart_paths.append(path4)
     
     # 5. Statistical summary table
     numeric_df = df.select_dtypes(include='number')
