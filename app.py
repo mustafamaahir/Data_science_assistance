@@ -85,6 +85,93 @@ elif nav == '📊 EDA & Profiling':
         st.subheader('🔍 Missing Data Analysis')
         missing_df = missing_summary(df)
         st.dataframe(missing_df, use_container_width=True)
+        
+        st.markdown('---')
+        st.subheader('💡 AI Data Insights')
+        
+        if st.button('🤖 Generate AI Interpretation of Data', type='primary'):
+            if not groq_token:
+                st.error('❌ Please provide Groq API Key in sidebar')
+            else:
+                with st.spinner('🤖 AI is analyzing your data...'):
+                    try:
+                        # Prepare data summary for AI
+                        numeric_summary = df.select_dtypes(include='number').describe().to_dict()
+                        categorical_info = {}
+                        for col in df.select_dtypes(exclude='number').columns[:5]:
+                            categorical_info[col] = {
+                                'unique': int(df[col].nunique()),
+                                'top_values': df[col].value_counts().head(3).to_dict()
+                            }
+                        
+                        missing_info = {col: f"{pct:.1f}%" for col, pct in (df.isna().mean() * 100).items() if pct > 0}
+                        
+                        correlations = {}
+                        numeric_df = df.select_dtypes(include='number')
+                        if numeric_df.shape[1] > 1:
+                            corr_matrix = numeric_df.corr()
+                            # Get top correlations
+                            for i in range(len(corr_matrix.columns)):
+                                for j in range(i+1, len(corr_matrix.columns)):
+                                    col1, col2 = corr_matrix.columns[i], corr_matrix.columns[j]
+                                    corr_val = corr_matrix.iloc[i, j]
+                                    if abs(corr_val) > 0.5:
+                                        correlations[f"{col1} vs {col2}"] = f"{corr_val:.3f}"
+                        
+                        prompt = f"""You are a data scientist analyzing a dataset. Provide BUSINESS-FOCUSED insights from this exploratory data analysis.
+
+Dataset Overview:
+- Rows: {df.shape[0]:,}
+- Columns: {df.shape[1]}
+- Numeric Features: {len(df.select_dtypes(include='number').columns)}
+- Categorical Features: {len(df.select_dtypes(exclude='number').columns)}
+
+Numeric Features Summary (first 5):
+{json.dumps(dict(list(numeric_summary.items())[:5]), indent=2)}
+
+Categorical Features (first 5):
+{json.dumps(categorical_info, indent=2)}
+
+Missing Data:
+{json.dumps(missing_info, indent=2) if missing_info else "No missing data"}
+
+Strong Correlations (|r| > 0.5):
+{json.dumps(correlations, indent=2) if correlations else "No strong correlations found"}
+
+Provide a comprehensive data analysis (4-5 paragraphs) covering:
+
+1. **Data Quality Assessment**: What's the overall quality? Are there red flags?
+
+2. **Key Patterns & Relationships**: What interesting patterns emerge? Which variables are related?
+
+3. **Business Implications**: What do these patterns tell us about the business/domain?
+
+4. **Data Concerns**: What issues need attention? (missing data, outliers, imbalances)
+
+5. **Recommendations**: What should be done before modeling? What features look promising?
+
+Write for a business audience - focus on what the data MEANS, not just statistics."""
+                        
+                        eda_insights = groq_generate_text(
+                            prompt=prompt,
+                            api_key=groq_token,
+                            model="llama-3.3-70b-versatile",
+                            max_tokens=1500
+                        )
+                        
+                        st.session_state['eda_insights'] = eda_insights
+                        st.success('✅ AI interpretation generated!')
+                        
+                        st.markdown('### 📊 Data Analysis & Insights')
+                        st.write(eda_insights)
+                        
+                    except Exception as e:
+                        st.error(f'Failed to generate insights: {e}')
+        
+        if 'eda_insights' in st.session_state and st.session_state['eda_insights']:
+            with st.expander('📋 View Saved EDA Insights'):
+                st.write(st.session_state['eda_insights'])
+        
         st.markdown('---')
         if st.button('🎨 Generate Comprehensive EDA Charts'):
             with st.spinner('Creating detailed visualizations...'):
@@ -294,43 +381,64 @@ Generate complete, runnable code now:"""
                 st.code(feature_code, language='python')
                 
                 st.markdown('---')
+                st.markdown('---')
                 st.subheader('⚡ Apply Features')
                 
-                if st.button('✅ Execute Feature Engineering'):
-                    with st.spinner('Creating features...'):
-                        try:
-                            # Store original columns
-                            original_cols = set(df.columns)
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button('✅ Execute Feature Engineering', type='primary', key='execute_features'):
+                        with st.spinner('Creating features...'):
+                            try:
+                                # Store original columns
+                                original_cols = set(df.columns)
+                                
+                                # Create a safe namespace with all necessary objects
+                                namespace = {
+                                    'df': df,
+                                    'np': np,
+                                    'pd': pd,
+                                    '__builtins__': __builtins__
+                                }
+                                
+                                # Execute the code
+                                exec(feature_code, namespace)
+                                
+                                # Get the modified dataframe back
+                                df = namespace['df']
+                                
+                                # Find new columns
+                                new_cols = set(df.columns) - original_cols
+                                
+                                if new_cols:
+                                    st.session_state['engineered_df'] = df
+                                    st.session_state['df'] = df
+                                    
+                                    st.success(f'✅ Created {len(new_cols)} new features!')
+                                    
+                                    st.subheader('🎉 New Features Created')
+                                    new_features_list = list(new_cols)
+                                    for idx, col in enumerate(new_features_list, 1):
+                                        st.write(f"{idx}. **{col}**")
+                                    
+                                    st.subheader('📊 Sample Data with New Features')
+                                    display_cols = list(original_cols)[:3] + new_features_list
+                                    st.dataframe(df[display_cols].head(10))
+                                    
+                                    st.info('💾 Features saved! Proceed to Preprocess tab to prepare for modeling.')
+                                else:
+                                    st.warning('No new features were created. Try regenerating the code.')
                             
-                            # Execute the code
-                            exec(feature_code, {'df': df, 'np': np, 'pd': pd})
-                            
-                            # Find new columns
-                            new_cols = set(df.columns) - original_cols
-                            
-                            if new_cols:
-                                st.session_state['engineered_df'] = df
-                                st.session_state['df'] = df
-                                
-                                st.success(f'✅ Created {len(new_cols)} new features!')
-                                
-                                st.subheader('🎉 New Features')
-                                for col in new_cols:
-                                    st.write(f"- **{col}**")
-                                
-                                st.subheader('📊 Sample Data')
-                                display_cols = list(original_cols)[:5] + list(new_cols)
-                                st.dataframe(df[display_cols].head(10))
-                                
-                                st.info('💾 Features saved! Proceed to Preprocess tab to prepare for modeling.')
-                            else:
-                                st.warning('No new features were created. Try regenerating.')
-                        
-                        except Exception as e:
-                            st.error(f'❌ Failed to execute code: {e}')
-                            st.write('**Debug Info:**')
-                            st.code(str(e))
-                            st.write('Try regenerating the code or check for syntax errors.')
+                            except Exception as e:
+                                st.error(f'❌ Failed to execute code: {e}')
+                                st.write('**Debug Info:**')
+                                st.code(str(e))
+                                st.write('**Problematic Code:**')
+                                st.code(feature_code)
+                                st.write('Try clicking "Generate AI Features" again to get new code.')
+                
+                with col2:
+                    if st.button('🔄 Regenerate Code', key='regen_code'):
+                        st.rerun()
             
             except Exception as e:
                 st.error(f'❌ AI feature generation failed: {e}')
@@ -537,6 +645,80 @@ elif nav == '🤖 Modeling':
                         plt.tight_layout()
                         st.pyplot(fig)
                         plt.close(fig)
+                
+                # AI Business Insights Section
+                st.markdown('---')
+                st.subheader('💡 AI Business Insights')
+                
+                if st.button('🤖 Generate Business Insights from Results', type='primary'):
+                    if not groq_token:
+                        st.error('❌ Please provide Groq API Key in sidebar')
+                    else:
+                        with st.spinner('🤖 Analyzing results and generating business insights...'):
+                            try:
+                                metrics_clean = {k: v for k, v in res['metrics'].items() if k not in ['confusion_matrix', 'classification_report', 'roc_curve', 'residuals']}
+                                
+                                feature_importance_text = ""
+                                if res.get('feature_importance') is not None:
+                                    top_features = res['feature_importance'].head(10)
+                                    feature_importance_text = "\n".join([f"- {row['Feature']}: {row['Importance']:.4f}" for _, row in top_features.iterrows()])
+                                
+                                prompt = f"""You are a business consultant analyzing machine learning results. Provide ACTIONABLE BUSINESS INSIGHTS.
+
+Problem Type: {problem_type.capitalize()}
+Model: {model_name}
+Target Variable: {st.session_state.get('target_column')}
+
+Model Performance:
+{json.dumps(metrics_clean, indent=2)}
+
+Top 10 Most Important Features:
+{feature_importance_text if feature_importance_text else "Not available"}
+
+Training Data: {res.get('X_train_shape', (0,))[0]:,} samples
+Test Data: {res.get('X_test_shape', (0,))[0]:,} samples
+
+Provide a comprehensive business analysis (5-6 paragraphs) covering:
+
+1. **Performance Assessment**: What does this performance mean in business terms? Is it good enough for production use?
+
+2. **Key Drivers**: Which factors most influence the outcome? What business actions can we take based on these drivers?
+
+3. **Business Recommendations**: 
+   - What immediate actions should the business take?
+   - Which areas need improvement or investigation?
+   - What opportunities does this model reveal?
+
+4. **Risk Assessment**: What are the limitations? Where might the model fail? What safeguards are needed?
+
+5. **ROI and Implementation**: 
+   - What's the expected business impact?
+   - How should this be deployed?
+   - What resources are needed?
+
+6. **Next Steps**: Concrete action items with priorities
+
+Focus on ACTIONABLE insights that executives and managers can implement. Avoid technical jargon."""
+                                
+                                business_insights = groq_generate_text(
+                                    prompt=prompt,
+                                    api_key=groq_token,
+                                    model="llama-3.3-70b-versatile",
+                                    max_tokens=2000
+                                )
+                                
+                                st.session_state['business_insights'] = business_insights
+                                st.success('✅ Business insights generated!')
+                                
+                                st.markdown('### 📊 Business Analysis')
+                                st.write(business_insights)
+                                
+                            except Exception as e:
+                                st.error(f'Failed to generate insights: {e}')
+                
+                if 'business_insights' in st.session_state and st.session_state['business_insights']:
+                    with st.expander('📋 View Saved Business Insights'):
+                        st.write(st.session_state['business_insights'])
         except Exception as e:
             st.error(f'❌ Training failed: {e}')
             import traceback
